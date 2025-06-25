@@ -1,0 +1,33 @@
+{
+  "id": "bfc9ac50-a74d-49e3-8f3e-ebde145464e1",
+  "name": "print_numbers.py",
+  "type": "source_code",
+  "version": 1,
+  "language": "python",
+  "path": "projects/print_numbers/workspace/print_numbers.py",
+  "created_at": "2025-06-25T20:26:03.821626+00:00",
+  "modified_at": "2025-06-25T20:26:03.821627+00:00",
+  "task_id": "682d0503-48ba-4020-b60c-17534728f710",
+  "agent_id": "8c2a8376-0560-4854-b10e-5f37b0db5f25",
+  "previous_version_id": null,
+  "checksum": "ac1c624790c3ba42876a59078c5597e479ce0328a3bf03e9683c678ed6ca5036",
+  "size_bytes": 346,
+  "encoding": "utf-8",
+  "dependencies": [],
+  "tags": [
+    "core_logic",
+    "Implement number printing logic"
+  ],
+  "metadata": {
+    "project_id": "print_numbers",
+    "request": "Create a python script that prints out the numbers 1-10",
+    "created_by": "agentic_system",
+    "language": "python",
+    "dependencies": [],
+    "complexity_score": 1,
+    "notes": "Simple implementation using range(1, 11) to generate numbers 1-10. Includes basic error handling and follows PEP 8 conventions.",
+    "frameworks": [],
+    "agent_role": "core_logic",
+    "workspace_file": true
+  }
+}

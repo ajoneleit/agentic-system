@@ -1,0 +1,1141 @@
+"""Base SubAgent implementation and specialized agent types.
+
+This module provides the foundation for all sub-agents that execute specific
+tasks under the coordination of the Meta Agent.
+"""
+
+import asyncio
+import json
+from abc import abstractmethod
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from uuid import UUID, uuid4
+
+from structlog import get_logger
+
+from config import get_settings, ClaudeModel
+from src.clients.claude_client import ClaudeClient
+from src.clients.claude_cli_client import ClaudeCLIClient
+from src.core.communication import Message, MessageType
+from src.core.exceptions import (
+    AgentError,
+    TaskExecutionError,
+)
+from src.core.interfaces import (
+    Agent,
+    AgentRole,
+    Artifact,
+    ArtifactType,
+    Task,
+    TaskContext,
+    TaskStatus,
+)
+from src.core.task_result import TaskResult
+from src.prompts.agent_prompts import get_agent_prompt
+from src.utils.app_logging import log_execution_time
+
+
+logger = get_logger(__name__)
+
+
+class SubAgent(Agent):
+    """Base class for all sub-agents in the system."""
+    
+    def __init__(self, agent_id: UUID, role: AgentRole):
+        """Initialize sub-agent.
+        
+        Args:
+            agent_id: Unique agent identifier
+            role: Agent's specialized role
+        """
+        super().__init__(agent_id, role)
+        self.claude_client: Optional[ClaudeClient] = None
+        self.claude_cli_client: Optional[ClaudeCLIClient] = None
+        self.use_cli: bool = False
+        self.context: Optional[TaskContext] = None
+        self._is_initialized = False
+        self._message_queue: asyncio.Queue = asyncio.Queue()
+        self._processing_task: Optional[asyncio.Task] = None
+        
+        logger.info(
+            "SubAgent created",
+            agent_id=str(agent_id),
+            role=role.value,
+        )
+    
+    async def initialize(self, context: TaskContext) -> None:
+        """Initialize agent with execution context.
+        
+        Args:
+            context: Task execution context
+        """
+        self.context = context
+        
+        # Initialize appropriate client based on agent role
+        settings = get_settings()
+        
+        # Use CLI for code generation tasks, API for Meta Agent tasks
+        if self.role in [AgentRole.CORE_LOGIC, AgentRole.TESTING, AgentRole.DOCUMENTATION, AgentRole.OPTIMIZATION]:
+            self.claude_cli_client = ClaudeCLIClient()
+            # Check if CLI is available
+            if not await self.claude_cli_client.check_cli_available():
+                logger.warning("Claude CLI not available, falling back to API")
+                self.claude_client = ClaudeClient()
+                self.use_cli = False
+            else:
+                self.claude_client = None  # Don't use API
+                self.use_cli = True
+        else:
+            # For other roles, use API
+            self.claude_client = ClaudeClient()
+            self.claude_cli_client = None
+            self.use_cli = False
+        
+        # Start message processing
+        self._processing_task = asyncio.create_task(self._process_messages())
+        
+        self._is_initialized = True
+        self.status = "idle"
+        
+        logger.info(
+            "SubAgent initialized",
+            agent_id=str(self.id),
+            role=self.role.value,
+            using_cli=self.use_cli,
+        )
+    
+    @abstractmethod
+    async def _execute_specific_task(
+        self,
+        task: Task,
+        context: TaskContext
+    ) -> List[Artifact]:
+        """Execute the agent's specific task implementation.
+        
+        Args:
+            task: Task to execute
+            context: Execution context
+            
+        Returns:
+            List of produced artifacts
+        """
+        pass
+    
+    @log_execution_time("task_execution")
+    async def execute_task(self, task: Task, context: TaskContext) -> TaskResult:
+        """Execute a task and produce artifacts.
+        
+        Args:
+            task: Task to execute
+            context: Execution context
+            
+        Returns:
+            TaskResult with produced artifacts
+        """
+        if not self._is_initialized:
+            raise AgentError(
+                self.id,
+                "Agent not initialized"
+            )
+        
+        self.current_task = task
+        self.status = "working"
+        
+        # Initialize task result
+        result = TaskResult(
+            task_id=task.id,
+            agent_id=self.id,
+            success=True,
+            start_time=datetime.now(timezone.utc)
+        )
+        
+        try:
+            logger.info(
+                "Starting task execution",
+                agent_id=str(self.id),
+                task_id=str(task.id),
+                task_name=task.name,
+            )
+            
+            # Execute the specific implementation
+            artifacts = await self._execute_specific_task(task, context)
+            
+            # Store artifacts using artifact manager if available
+            if context.artifact_manager:
+                for artifact in artifacts:
+                    try:
+                        # Store artifact in management system
+                        stored = await context.artifact_manager.store_artifact(artifact)
+                        result.add_artifact(stored.id, is_primary=(len(result.artifacts) == 0))
+                        self.produced_artifacts.append(stored.id)
+                    except Exception as e:
+                        logger.error(
+                            "Failed to store artifact",
+                            artifact_name=artifact.name,
+                            error=str(e)
+                        )
+                        result.add_warning(f"Failed to store artifact {artifact.name}: {str(e)}")
+            else:
+                # Fallback: just track artifact IDs
+                for artifact in artifacts:
+                    result.add_artifact(artifact.id, is_primary=(len(result.artifacts) == 0))
+                    self.produced_artifacts.append(artifact.id)
+            
+            # Record successful completion
+            self.completed_tasks.append(task.id)
+            result.end_time = datetime.now(timezone.utc)
+            result.execution_time = (result.end_time - result.start_time).total_seconds()
+            
+            logger.info(
+                "Task completed successfully",
+                agent_id=str(self.id),
+                task_id=str(task.id),
+                artifacts_produced=len(artifacts),
+                execution_time=result.execution_time,
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(
+                "Task execution failed",
+                agent_id=str(self.id),
+                task_id=str(task.id),
+                error=str(e),
+                exc_info=True,
+            )
+            
+            result.success = False
+            result.add_error(str(e))
+            result.end_time = datetime.now(timezone.utc)
+            result.execution_time = (result.end_time - result.start_time).total_seconds()
+            
+            return result
+            
+        finally:
+            self.current_task = None
+            self.status = "idle"
+    
+    async def _create_artifact(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        name: str,
+        task: Task,
+        context: TaskContext,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Artifact:
+        """Create an artifact with proper metadata.
+        
+        Args:
+            content: Artifact content
+            artifact_type: Type of artifact
+            name: Artifact name
+            task: Current task
+            context: Task context
+            metadata: Additional metadata
+            
+        Returns:
+            Created artifact
+        """
+        # Generate artifact name based on naming convention
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        artifact_name = context.artifact_naming_convention.format(
+            task_name=task.name.replace(" ", "_"),
+            agent_type=self.role.value,
+            timestamp=timestamp,
+            name=name
+        )
+        
+        # Determine file extension based on type and language
+        extension = self._get_file_extension(artifact_type, metadata)
+        if extension and not artifact_name.endswith(extension):
+            artifact_name += extension
+        
+        # Create artifact
+        artifact = Artifact(
+            id=uuid4(),
+            name=artifact_name,
+            type=artifact_type,
+            content=content,
+            path=Path(artifact_name),
+            language=metadata.get("language") if metadata else None,
+            version=1,
+            created_at=datetime.now(timezone.utc),
+            modified_at=datetime.now(timezone.utc),
+            task_id=task.id,
+            agent_id=self.id,
+            tags={self.role.value, task.name},
+            metadata={
+                **context.artifact_metadata_template,
+                **(metadata or {}),
+                "agent_role": self.role.value,
+                "project_id": context.project_id,
+                "parent_task": str(context.parent_task_id) if context.parent_task_id else None,
+            }
+        )
+        
+        return artifact
+    
+    async def _write_to_workspace(
+        self,
+        filename: str,
+        content: str,
+        context: TaskContext,
+        task: Task,
+        artifact_type: ArtifactType = ArtifactType.SOURCE_CODE,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Artifact:
+        """Write a file directly to the project workspace.
+        
+        Args:
+            filename: Simple filename (e.g., "hello_world.py")
+            content: File content
+            context: Task context with workspace path
+            task: Current task
+            artifact_type: Type of artifact
+            metadata: Additional metadata
+            
+        Returns:
+            Created artifact
+        """
+        # Get workspace path from context
+        workspace_path = Path(context.shared_memory.get("workspace_path", "."))
+        
+        # Write file to workspace
+        file_path = workspace_path / filename
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content, encoding='utf-8')
+        
+        logger.info(
+            "Wrote file to workspace",
+            filename=filename,
+            path=str(file_path),
+            size=len(content)
+        )
+        
+        # Update project files list in shared memory
+        project_files = context.shared_memory.get("project_files", [])
+        if filename not in project_files:
+            project_files.append(filename)
+            context.shared_memory["project_files"] = project_files
+        
+        # Create artifact record (but with simple name and workspace path)
+        artifact = Artifact(
+            id=uuid4(),
+            name=filename,  # Use simple filename, not UUID-based name
+            type=artifact_type,
+            content=content,
+            path=file_path,  # Actual workspace path
+            language=metadata.get("language") if metadata else None,
+            version=1,
+            created_at=datetime.now(timezone.utc),
+            modified_at=datetime.now(timezone.utc),
+            task_id=task.id,
+            agent_id=self.id,
+            tags={self.role.value, task.name},
+            metadata={
+                **context.artifact_metadata_template,
+                **(metadata or {}),
+                "agent_role": self.role.value,
+                "project_id": context.project_id,
+                "workspace_file": True,  # Mark as workspace file
+            }
+        )
+        
+        # Store in artifact manager for versioning/tracking
+        if context.artifact_manager:
+            try:
+                await context.artifact_manager.store_artifact(artifact)
+            except Exception as e:
+                logger.warning(
+                    "Failed to store artifact in manager",
+                    error=str(e),
+                    artifact_id=str(artifact.id)
+                )
+        
+        return artifact
+    
+    async def _read_from_workspace(
+        self,
+        filename: str,
+        context: TaskContext
+    ) -> Optional[str]:
+        """Read a file from the project workspace.
+        
+        Args:
+            filename: Simple filename to read
+            context: Task context with workspace path
+            
+        Returns:
+            File content or None if not found
+        """
+        workspace_path = Path(context.shared_memory.get("workspace_path", "."))
+        file_path = workspace_path / filename
+        
+        if file_path.exists():
+            return file_path.read_text(encoding='utf-8')
+        
+        logger.warning(
+            "File not found in workspace",
+            filename=filename,
+            path=str(file_path)
+        )
+        return None
+    
+    async def _update_artifact(
+        self,
+        artifact_id: UUID,
+        new_content: str,
+        reason: str,
+        context: TaskContext
+    ) -> Optional[Artifact]:
+        """Update an existing artifact.
+        
+        Args:
+            artifact_id: ID of artifact to update
+            new_content: New content
+            reason: Reason for update
+            context: Task context
+            
+        Returns:
+            Updated artifact or None if failed
+        """
+        if not context.artifact_manager:
+            logger.warning("No artifact manager available for update")
+            return None
+        
+        try:
+            updated = await context.artifact_manager.update_artifact(
+                artifact_id,
+                new_content,
+                reason=reason,
+                metadata={"updated_by": str(self.id)}
+            )
+            return updated
+        except Exception as e:
+            logger.error(
+                "Failed to update artifact",
+                artifact_id=str(artifact_id),
+                error=str(e)
+            )
+            return None
+    
+    async def _link_artifacts(
+        self,
+        primary: Artifact,
+        dependency: Artifact,
+        context: TaskContext
+    ) -> None:
+        """Link two artifacts as dependencies.
+        
+        Args:
+            primary: Primary artifact
+            dependency: Dependency artifact
+            context: Task context
+        """
+        if not context.artifact_manager:
+            return
+        
+        try:
+            # Use dependency tracker if available
+            if hasattr(context.artifact_manager, '_dependency_tracker'):
+                tracker = context.artifact_manager._dependency_tracker
+                await tracker.add_dependency(
+                    primary.id,
+                    dependency.id,
+                    dependency_type="depends_on",
+                    metadata={"linked_by": str(self.id)}
+                )
+            else:
+                # Fallback: add to artifact metadata
+                primary.dependencies.append(dependency.id)
+                dependency.dependent_artifacts.append(primary.id)
+        except Exception as e:
+            logger.error(
+                "Failed to link artifacts",
+                primary_id=str(primary.id),
+                dependency_id=str(dependency.id),
+                error=str(e)
+            )
+    
+    async def _get_task_artifacts(
+        self,
+        task_id: UUID,
+        context: TaskContext
+    ) -> List[Artifact]:
+        """Get all artifacts for a task.
+        
+        Args:
+            task_id: Task ID
+            context: Task context
+            
+        Returns:
+            List of artifacts
+        """
+        if not context.artifact_manager:
+            return []
+        
+        try:
+            return await context.artifact_manager.get_artifacts_by_task(task_id)
+        except Exception as e:
+            logger.error(
+                "Failed to get task artifacts",
+                task_id=str(task_id),
+                error=str(e)
+            )
+            return []
+    
+    def _get_file_extension(
+        self,
+        artifact_type: ArtifactType,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Get appropriate file extension for artifact type.
+        
+        Args:
+            artifact_type: Type of artifact
+            metadata: Artifact metadata
+            
+        Returns:
+            File extension with dot (e.g., ".py")
+        """
+        language = metadata.get("language") if metadata else None
+        
+        if artifact_type == ArtifactType.SOURCE_CODE:
+            language_extensions = {
+                "python": ".py",
+                "javascript": ".js",
+                "typescript": ".ts",
+                "java": ".java",
+                "go": ".go",
+                "rust": ".rs",
+                "cpp": ".cpp",
+                "c": ".c",
+            }
+            return language_extensions.get(language, ".txt")
+        elif artifact_type == ArtifactType.TEST_CODE:
+            if language == "python":
+                return "_test.py"
+            elif language in ["javascript", "typescript"]:
+                return ".test.js" if language == "javascript" else ".test.ts"
+            else:
+                return f"_test{self._get_file_extension(ArtifactType.SOURCE_CODE, metadata)}"
+        elif artifact_type == ArtifactType.DOCUMENTATION:
+            return ".md"
+        elif artifact_type == ArtifactType.CONFIGURATION:
+            return ".json"
+        elif artifact_type == ArtifactType.BUILD_OUTPUT:
+            return ".log"
+        else:
+            return ".txt"
+    
+    async def collaborate(self, other_agent: Agent, message: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle collaboration messages from other agents.
+        
+        Args:
+            other_agent: Agent sending the message
+            message: Communication message
+            
+        Returns:
+            Response message
+        """
+        # Convert dict to Message object if needed
+        if isinstance(message, dict):
+            msg = Message(**message)
+        else:
+            msg = message
+        
+        # Queue message for processing
+        await self._message_queue.put(msg)
+        
+        # Return acknowledgment
+        return {
+            "acknowledged": True,
+            "agent_id": str(self.id),
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    
+    async def _process_messages(self) -> None:
+        """Process incoming messages asynchronously."""
+        while True:
+            try:
+                message = await self._message_queue.get()
+                await self._handle_message(message)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(
+                    "Error processing message",
+                    agent_id=str(self.id),
+                    error=str(e),
+                )
+    
+    async def _handle_message(self, message: Message) -> None:
+        """Handle a specific message.
+        
+        Args:
+            message: Message to handle
+        """
+        logger.debug(
+            "Handling message",
+            agent_id=str(self.id),
+            message_type=message.message_type.value,
+            sender_id=str(message.sender_id),
+        )
+        
+        # Override in subclasses for specific handling
+        pass
+    
+    async def _query_claude(
+        self,
+        prompt: str,
+        model: Optional[ClaudeModel] = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        system_prompt: Optional[str] = None,
+        task_type: str = "code",
+        context_files: Optional[List[Path]] = None,
+    ) -> str:
+        """Query Claude with a prompt using CLI or API.
+        
+        Args:
+            prompt: User prompt
+            model: Claude model to use (ignored for CLI)
+            max_tokens: Maximum response tokens
+            temperature: Sampling temperature
+            system_prompt: System prompt
+            task_type: Type of task for CLI (code, test, documentation)
+            context_files: Optional files to include as context for CLI
+            
+        Returns:
+            Claude's response text
+        """
+        if self.use_cli and self.claude_cli_client:
+            # Use CLI for code generation
+            if system_prompt:
+                prompt = f"{system_prompt}\n\n{prompt}"
+                
+            response = await self.claude_cli_client.create_message_for_code(
+                messages=[{"role": "user", "content": prompt}],
+                task_type=task_type,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                context_files=context_files,
+            )
+            return response["content"][0]["text"]
+        else:
+            # Fall back to API
+            if not self.claude_client:
+                raise AgentError(self.id, "Claude client not initialized")
+            
+            settings = get_settings()
+            model = model or settings.agent.default_model
+            
+            if system_prompt is None:
+                system_prompt = f"You are a {self.role.value} agent in an autonomous coding system."
+            
+            response = await self.claude_client.create_message(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                system=system_prompt,
+            )
+            
+            return response.content[0].text
+    
+    async def shutdown(self) -> None:
+        """Gracefully shutdown the agent."""
+        logger.info(
+            "Shutting down agent",
+            agent_id=str(self.id),
+            role=self.role.value,
+        )
+        
+        # Cancel message processing
+        if self._processing_task:
+            self._processing_task.cancel()
+            try:
+                await self._processing_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Close Claude client
+        if self.claude_client:
+            await self.claude_client.close()
+        if self.claude_cli_client:
+            await self.claude_cli_client.close()
+        
+        self.status = "terminated"
+        logger.info("Agent shutdown complete", agent_id=str(self.id))
+
+
+class CodeGeneratorAgent(SubAgent):
+    """Agent specialized in generating code."""
+    
+    def __init__(self, agent_id: UUID):
+        """Initialize code generator agent."""
+        super().__init__(agent_id, AgentRole.CORE_LOGIC)
+    
+    async def _execute_specific_task(
+        self,
+        task: Task,
+        context: TaskContext
+    ) -> List[Artifact]:
+        """Generate code based on task specification.
+        
+        Args:
+            task: Task to execute
+            context: Execution context
+            
+        Returns:
+            List of code artifacts
+        """
+        # Get the code generation prompt
+        prompt_template = get_agent_prompt(self.role, "main")
+        
+        # Prepare prompt variables
+        task_spec = task.metadata.get("specification", {})
+        prompt_vars = {
+            "task_specification": json.dumps(task_spec, indent=2),
+            "project_context": json.dumps(context.shared_memory.get("project_context", {}), indent=2),
+            "language": task_spec.get("language", "python"),
+            "frameworks": json.dumps(task_spec.get("frameworks", []), indent=2),
+            "style_guide": context.global_constraints.get("style_guide", "PEP 8"),
+            "available_artifacts": json.dumps(
+                [str(aid) for aid in task.artifacts],
+                indent=2
+            ),
+        }
+        
+        # Generate the prompt
+        prompt = prompt_template.render(**prompt_vars)
+        
+        # Query Claude
+        response = await self._query_claude(
+            prompt,
+            model=ClaudeModel.SONNET,
+            temperature=0.3,  # Lower temperature for code generation
+            task_type="code",
+        )
+        
+        # Parse response
+        try:
+            result = json.loads(response)
+        except json.JSONDecodeError:
+            # Try to extract JSON from response
+            import re
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                raise ValueError("Failed to parse Claude response as JSON")
+        
+        # Write code directly to workspace using simple filename
+        filename = result.get("filename", "generated_code.py")
+        # Ensure filename is simple (no UUID prefixes)
+        if "_" in filename and len(filename.split("_")[0]) > 20:
+            # Likely has UUID prefix, extract the actual filename
+            parts = filename.split("_")
+            filename = "_".join(parts[1:]) if len(parts) > 1 else filename
+        
+        artifact = await self._write_to_workspace(
+            filename=filename,
+            content=result["code"],
+            context=context,
+            task=task,
+            artifact_type=ArtifactType.SOURCE_CODE,
+            metadata={
+                "language": task_spec.get("language", "python"),
+                "dependencies": result.get("dependencies", []),
+                "complexity_score": result.get("complexity_score", 5),
+                "notes": result.get("notes", ""),
+                "frameworks": task_spec.get("frameworks", []),
+            }
+        )
+        
+        # Track dependencies if specified
+        if "imports" in result:
+            artifact.metadata["imports"] = result["imports"]
+        
+        return [artifact]
+
+
+class TestWriterAgent(SubAgent):
+    """Agent specialized in writing tests."""
+    
+    def __init__(self, agent_id: UUID):
+        """Initialize test writer agent."""
+        super().__init__(agent_id, AgentRole.TESTING)
+    
+    async def _execute_specific_task(
+        self,
+        task: Task,
+        context: TaskContext
+    ) -> List[Artifact]:
+        """Generate tests for code.
+        
+        Args:
+            task: Task to execute
+            context: Execution context
+            
+        Returns:
+            List of test artifacts
+        """
+        # Get the test generation prompt
+        prompt_template = get_agent_prompt(self.role, "main")
+        
+        # Get the code to test from workspace
+        # First check if a specific file is mentioned in the task
+        task_spec = task.metadata.get("specification", {})
+        code_file = None
+        
+        # Try to find the file to test from task metadata or by looking for Python files
+        if "deliverable" in task_spec:
+            # Extract filename from deliverable description
+            deliverable = task_spec["deliverable"]
+            if ".py" in deliverable:
+                import re
+                match = re.search(r'(\w+\.py)', deliverable)
+                if match:
+                    code_file = match.group(1)
+        
+        # If no specific file, look for any Python file in workspace
+        if not code_file:
+            project_files = context.shared_memory.get("project_files", [])
+            py_files = [f for f in project_files if f.endswith('.py') and not f.startswith('test_')]
+            if py_files:
+                code_file = py_files[0]  # Test the first Python file found
+        
+        if not code_file:
+            raise ValueError("No Python file found in workspace to test")
+        
+        # Read the code from workspace
+        code_to_test = await self._read_from_workspace(code_file, context)
+        if not code_to_test:
+            raise ValueError(f"Could not read file {code_file} from workspace")
+        
+        # Prepare prompt variables
+        task_spec = task.metadata.get("specification", {})
+        prompt_vars = {
+            "code_to_test": code_to_test,
+            "task_specification": json.dumps(task_spec, indent=2),
+            "test_framework": task_spec.get("test_framework", "pytest"),
+            "coverage_target": task_spec.get("coverage_target", 90),
+            "project_context": json.dumps(context.shared_memory.get("project_context", {}), indent=2),
+        }
+        
+        # Generate the prompt
+        prompt = prompt_template.render(**prompt_vars)
+        
+        # Query Claude
+        response = await self._query_claude(
+            prompt,
+            model=ClaudeModel.SONNET,
+            temperature=0.3,
+            task_type="test",
+        )
+        
+        # Parse response
+        try:
+            result = json.loads(response)
+        except json.JSONDecodeError:
+            import re
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                raise ValueError("Failed to parse Claude response as JSON")
+        
+        # Write test file to workspace
+        test_filename = result.get("filename", f"test_{code_file}" if code_file else "test_generated.py")
+        # Ensure it starts with test_ for convention
+        if not test_filename.startswith("test_"):
+            test_filename = f"test_{test_filename}"
+            
+        test_artifact = await self._write_to_workspace(
+            filename=test_filename,
+            content=result["test_code"],
+            context=context,
+            task=task,
+            artifact_type=ArtifactType.TEST_CODE,
+            metadata={
+                "language": task_spec.get("language", "python"),
+                "test_framework": task_spec.get("test_framework", "pytest"),
+                "test_cases": result.get("test_cases", []),
+                "coverage_estimate": result.get("coverage_estimate", 0),
+                "mocks_required": result.get("mocks_required", []),
+                "tested_file": code_file,
+            }
+        )
+        
+        return [test_artifact]
+
+
+class DocumentationAgent(SubAgent):
+    """Agent specialized in creating documentation."""
+    
+    def __init__(self, agent_id: UUID):
+        """Initialize documentation agent."""
+        super().__init__(agent_id, AgentRole.DOCUMENTATION)
+    
+    async def _execute_specific_task(
+        self,
+        task: Task,
+        context: TaskContext
+    ) -> List[Artifact]:
+        """Generate documentation for code.
+        
+        Args:
+            task: Task to execute
+            context: Execution context
+            
+        Returns:
+            List of documentation artifacts
+        """
+        # Get the documentation prompt
+        prompt_template = get_agent_prompt(self.role, "main")
+        
+        # Get the code to document
+        code_to_document = task.metadata.get("code_to_document", "# Code placeholder")
+        
+        # Prepare prompt variables
+        task_spec = task.metadata.get("specification", {})
+        prompt_vars = {
+            "code_to_document": code_to_document,
+            "doc_type": task_spec.get("doc_type", "api"),
+            "target_audience": task_spec.get("target_audience", "developers"),
+            "project_context": json.dumps(context.shared_memory.get("project_context", {}), indent=2),
+            "doc_style": task_spec.get("doc_style", "sphinx"),
+        }
+        
+        # Generate the prompt
+        prompt = prompt_template.render(**prompt_vars)
+        
+        # Query Claude
+        response = await self._query_claude(
+            prompt,
+            model=ClaudeModel.SONNET,
+            temperature=0.5,
+            task_type="documentation",
+        )
+        
+        # Parse response
+        try:
+            result = json.loads(response)
+        except json.JSONDecodeError:
+            import re
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                raise ValueError("Failed to parse Claude response as JSON")
+        
+        # Create documentation artifact using helper method
+        artifact = await self._create_artifact(
+            content=result["documentation"],
+            artifact_type=ArtifactType.DOCUMENTATION,
+            name=result.get("filename", "documentation.md"),
+            task=task,
+            context=context,
+            metadata={
+                "language": "markdown",
+                "doc_type": task_spec.get("doc_type", "api"),
+                "target_audience": task_spec.get("target_audience", "developers"),
+                "sections": result.get("sections", []),
+                "api_reference": result.get("api_reference", {}),
+            }
+        )
+        
+        return [artifact]
+
+
+class RefactorAgent(SubAgent):
+    """Agent specialized in code refactoring and optimization."""
+    
+    def __init__(self, agent_id: UUID):
+        """Initialize refactor agent."""
+        super().__init__(agent_id, AgentRole.OPTIMIZATION)
+    
+    async def _execute_specific_task(
+        self,
+        task: Task,
+        context: TaskContext
+    ) -> List[Artifact]:
+        """Refactor and optimize code.
+        
+        Args:
+            task: Task to execute
+            context: Execution context
+            
+        Returns:
+            List of refactored code artifacts
+        """
+        # Get the refactoring prompt
+        prompt_template = get_agent_prompt(self.role, "main")
+        
+        # Get the code to refactor
+        code_to_refactor = task.metadata.get("code_to_refactor", "# Code placeholder")
+        
+        # Prepare prompt variables
+        task_spec = task.metadata.get("specification", {})
+        prompt_vars = {
+            "code_to_refactor": code_to_refactor,
+            "refactoring_goals": json.dumps(
+                task_spec.get("refactoring_goals", ["improve readability", "optimize performance"]),
+                indent=2
+            ),
+            "constraints": json.dumps(
+                task_spec.get("constraints", ["maintain backward compatibility"]),
+                indent=2
+            ),
+            "project_context": json.dumps(context.shared_memory.get("project_context", {}), indent=2),
+        }
+        
+        # Generate the prompt
+        prompt = prompt_template.render(**prompt_vars)
+        
+        # Query Claude
+        response = await self._query_claude(
+            prompt,
+            model=ClaudeModel.OPUS,  # Use Opus for complex refactoring
+            temperature=0.3,
+            task_type="code",
+        )
+        
+        # Parse response
+        try:
+            result = json.loads(response)
+        except json.JSONDecodeError:
+            import re
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                raise ValueError("Failed to parse Claude response as JSON")
+        
+        # Create refactored artifact using helper method
+        artifact = await self._create_artifact(
+            content=result["refactored_code"],
+            artifact_type=ArtifactType.SOURCE_CODE,
+            name=result.get("filename", "refactored_code.py"),
+            task=task,
+            context=context,
+            metadata={
+                "language": task_spec.get("language", "python"),
+                "refactoring_goals": task_spec.get("refactoring_goals", []),
+                "changes": result.get("changes", []),
+                "metrics": result.get("metrics", {}),
+                "breaking_changes": result.get("breaking_changes", []),
+                "performance_improvement": result.get("performance_improvement", {}),
+            }
+        )
+        
+        # If original artifact ID provided, link the refactored version
+        original_artifact_id = task.metadata.get("original_artifact_id")
+        if original_artifact_id and context.artifact_manager:
+            try:
+                original_artifact = await context.artifact_manager.get_artifact(UUID(original_artifact_id))
+                if original_artifact:
+                    await self._link_artifacts(artifact, original_artifact, context)
+            except Exception as e:
+                logger.warning(f"Failed to link to original artifact: {e}")
+        
+        return [artifact]
+
+
+class DebugAgent(SubAgent):
+    """Agent specialized in debugging and fixing issues."""
+    
+    def __init__(self, agent_id: UUID):
+        """Initialize debug agent."""
+        super().__init__(agent_id, AgentRole.VERIFICATION)
+    
+    async def _execute_specific_task(
+        self,
+        task: Task,
+        context: TaskContext
+    ) -> List[Artifact]:
+        """Debug and fix code issues.
+        
+        Args:
+            task: Task to execute
+            context: Execution context
+            
+        Returns:
+            List of fixed code artifacts
+        """
+        # Get the debug analysis prompt
+        prompt_template = get_agent_prompt(self.role, "main")
+        
+        # Prepare prompt variables
+        task_spec = task.metadata.get("specification", {})
+        prompt_vars = {
+            "problematic_code": task_spec.get("problematic_code", "# Code with issues"),
+            "error_info": json.dumps(task_spec.get("error_info", {}), indent=2),
+            "expected_behavior": task_spec.get("expected_behavior", ""),
+            "actual_behavior": task_spec.get("actual_behavior", ""),
+            "project_context": json.dumps(context.shared_memory.get("project_context", {}), indent=2),
+        }
+        
+        # Generate the prompt
+        prompt = prompt_template.render(**prompt_vars)
+        
+        # Query Claude
+        response = await self._query_claude(
+            prompt,
+            model=ClaudeModel.OPUS,  # Use Opus for complex debugging
+            temperature=0.2,  # Lower temperature for precise fixes
+            task_type="code",
+        )
+        
+        # Parse response
+        try:
+            result = json.loads(response)
+        except json.JSONDecodeError:
+            import re
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                raise ValueError("Failed to parse Claude response as JSON")
+        
+        # Get the recommended solution
+        solutions = result.get("solutions", [])
+        if not solutions:
+            raise ValueError("No solutions provided")
+        
+        recommended_idx = result.get("recommended_solution", 0)
+        solution = solutions[recommended_idx]
+        
+        # Create fixed artifact using helper method
+        artifact = await self._create_artifact(
+            content=solution["code_fix"],
+            artifact_type=ArtifactType.SOURCE_CODE,
+            name=result.get("filename", "fixed_code.py"),
+            task=task,
+            context=context,
+            metadata={
+                "language": task_spec.get("language", "python"),
+                "error_type": task_spec.get("error_info", {}).get("type", "unknown"),
+                "diagnosis": result.get("diagnosis", {}),
+                "solution": solution,
+                "prevention": result.get("prevention", {}),
+                "fix_confidence": solution.get("confidence", 0.0),
+                "test_recommendations": result.get("test_recommendations", []),
+            }
+        )
+        
+        # If debugging an existing artifact, link the fixed version
+        problematic_artifact_id = task.metadata.get("problematic_artifact_id")
+        if problematic_artifact_id and context.artifact_manager:
+            try:
+                problematic_artifact = await context.artifact_manager.get_artifact(UUID(problematic_artifact_id))
+                if problematic_artifact:
+                    await self._link_artifacts(artifact, problematic_artifact, context)
+            except Exception as e:
+                logger.warning(f"Failed to link to problematic artifact: {e}")
+        
+        return [artifact]
