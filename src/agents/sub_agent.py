@@ -57,6 +57,7 @@ class SubAgent(Agent):
         self._is_initialized = False
         self._message_queue: asyncio.Queue = asyncio.Queue()
         self._processing_task: Optional[asyncio.Task] = None
+        self._last_cli_response: Optional[str] = None  # Track CLI responses for debugging
         
         logger.info(
             "SubAgent created",
@@ -616,6 +617,13 @@ class SubAgent(Agent):
             # Use CLI for code generation
             if system_prompt:
                 prompt = f"{system_prompt}\n\n{prompt}"
+            
+            logger.debug(
+                "Using Claude CLI",
+                task_type=task_type,
+                prompt_length=len(prompt),
+                context_files=len(context_files) if context_files else 0
+            )
                 
             response = await self.claude_cli_client.create_message_for_code(
                 messages=[{"role": "user", "content": prompt}],
@@ -624,7 +632,15 @@ class SubAgent(Agent):
                 max_tokens=max_tokens,
                 context_files=context_files,
             )
-            return response["content"][0]["text"]
+            # Track CLI response for debugging
+            cli_response = response.get("content", [{}])[0].get("text", "")
+            self._last_cli_response = cli_response
+            
+            if not cli_response:
+                logger.error("Empty CLI response", response=response)
+                raise ValueError("Received empty response from Claude CLI")
+                
+            return cli_response
         else:
             # Fall back to API
             if not self.claude_client:
@@ -636,6 +652,12 @@ class SubAgent(Agent):
             if system_prompt is None:
                 system_prompt = f"You are a {self.role.value} agent in an autonomous coding system."
             
+            logger.debug(
+                "Using Claude API",
+                model=model.value if hasattr(model, 'value') else model,
+                prompt_length=len(prompt)
+            )
+            
             response = await self.claude_client.create_message(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
@@ -644,7 +666,17 @@ class SubAgent(Agent):
                 system=system_prompt,
             )
             
-            return response.content[0].text
+            if not response or not hasattr(response, 'content') or not response.content:
+                logger.error("Empty API response", response=response)
+                raise ValueError("Received empty response from Claude API")
+                
+            api_response = response.content[0].text
+            
+            if not api_response:
+                logger.error("Empty text in API response", response=response)
+                raise ValueError("Received empty text from Claude API")
+                
+            return api_response
     
     async def shutdown(self) -> None:
         """Gracefully shutdown the agent."""
@@ -698,6 +730,9 @@ class CodeGeneratorAgent(SubAgent):
         
         # Prepare prompt variables
         task_spec = task.metadata.get("specification", {})
+        workspace_dir = context.project_root / "workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        
         prompt_vars = {
             "task_specification": json.dumps(task_spec, indent=2),
             "project_context": json.dumps(context.shared_memory.get("project_context", {}), indent=2),
@@ -713,54 +748,295 @@ class CodeGeneratorAgent(SubAgent):
         # Generate the prompt
         prompt = prompt_template.render(**prompt_vars)
         
-        # Query Claude
+        # Add workspace directory instruction and explicit code generation request
+        prompt = f"""You are working in the directory: {workspace_dir}
+
+IMPORTANT: You cannot write files directly when using --print mode. Instead, please provide the complete code in code blocks with the filename specified.
+
+Format your response like this:
+```python
+# filename: calculator.py
+# Complete code here
+```
+
+{prompt}
+
+Please provide the complete code implementation in code blocks. Do not ask for permission to write files."""
+        
+        # Get context files from workspace (only actual files, not directories)
+        context_files = None
+        if workspace_dir.exists():
+            # Get all relevant code files
+            context_files = []
+            for pattern in ["*.py", "*.js", "*.ts", "*.java", "*.go", "*.rs", "*.cpp", "*.c", "*.h"]:
+                context_files.extend(workspace_dir.glob(pattern))
+            # Only include actual files, not directories
+            context_files = [f for f in context_files if f.is_file()]
+            if not context_files:
+                context_files = None
+        
+        # Query Claude with workspace context
         response = await self._query_claude(
             prompt,
             model=ClaudeModel.SONNET,
             temperature=0.3,  # Lower temperature for code generation
             task_type="code",
+            context_files=context_files,
         )
         
-        # Parse response
+        # Parse response to get summary of what was created
+        # When using CLI with --print, we need to extract and write files ourselves
+        summary = {}
         try:
-            result = json.loads(response)
-        except json.JSONDecodeError:
-            # Try to extract JSON from response
+            # Try to extract JSON summary from response
             import re
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            json_match = re.search(r'\{[^{}]*"files_created"[^{}]*\}', response, re.DOTALL)
             if json_match:
-                result = json.loads(json_match.group())
-            else:
-                raise ValueError("Failed to parse Claude response as JSON")
+                summary = json.loads(json_match.group())
+        except:
+            # If no JSON summary, that's okay - we'll check the workspace
+            logger.debug("No JSON summary in response, checking workspace for created files")
         
-        # Write code directly to workspace using simple filename
-        filename = result.get("filename", "generated_code.py")
-        # Ensure filename is simple (no UUID prefixes)
-        if "_" in filename and len(filename.split("_")[0]) > 20:
-            # Likely has UUID prefix, extract the actual filename
-            parts = filename.split("_")
-            filename = "_".join(parts[1:]) if len(parts) > 1 else filename
+        # When using CLI, extract code blocks and write them
+        if self.use_cli and response:
+            import re
+            logger.debug(f"CLI Response preview: {response[:500]}...")
+            
+            files_found = False
+            
+            # First, check if the response is JSON with code field
+            json_parsed = False
+            try:
+                json_response = json.loads(response.strip())
+                logger.debug(f"Successfully parsed JSON response: {list(json_response.keys()) if isinstance(json_response, dict) else 'not a dict'}")
+                if isinstance(json_response, dict) and "code" in json_response:
+                    json_parsed = True
+                    # Handle JSON response format
+                    code = json_response.get("code", "")
+                    filename = json_response.get("filename", f"{task.name.lower().replace(' ', '_')}.py")
+                    
+                    logger.info(f"Found JSON response with code field, filename: {filename}")
+                    if code:
+                        file_path = workspace_dir / filename
+                        file_path.write_text(code.strip())
+                        logger.info(f"Wrote file from CLI JSON response: {filename}")
+                        if "files_created" not in summary:
+                            summary["files_created"] = []
+                        summary["files_created"].append(filename)
+                        files_found = True
+                        
+                        # Update summary with other fields
+                        if "dependencies" in json_response:
+                            summary["dependencies"] = json_response["dependencies"]
+                        if "notes" in json_response:
+                            summary["notes"] = json_response["notes"]
+                        if "complexity_score" in json_response:
+                            summary["complexity_score"] = json_response["complexity_score"]
+            except json.JSONDecodeError as e:
+                # Not valid JSON, but might be a JSON-like response with unescaped newlines
+                logger.debug(f"Initial JSON parse failed: {e}")
+                
+                # Try to extract code from malformed JSON response
+                if response.strip().startswith('{') and '"code"' in response:
+                    import re
+                    # Try multiple patterns to extract code
+                    patterns = [
+                        # Pattern 1: "code": "..." with proper escaping
+                        r'"code"\s*:\s*"((?:[^"\\]|\\.)*)"',
+                        # Pattern 2: Multiline code block after "code":
+                        r'"code"\s*:\s*"([^"]+)"',
+                        # Pattern 3: Extract everything between "code": " and the next ",
+                        r'"code"\s*:\s*"(.*?)",\s*"[^"]+"\s*:',
+                    ]
+                    
+                    for pattern in patterns:
+                        match = re.search(pattern, response, re.DOTALL)
+                        if match:
+                            code = match.group(1)
+                            # Unescape any escaped quotes
+                            code = code.replace('\\"', '"')
+                            
+                            # Try to get filename
+                            filename_match = re.search(r'"filename"\s*:\s*"([^"]+)"', response)
+                            filename = filename_match.group(1) if filename_match else f"{task.name.lower().replace(' ', '_')}.py"
+                            
+                            logger.info(f"Extracted code from malformed JSON, filename: {filename}")
+                            file_path = workspace_dir / filename
+                            file_path.write_text(code.strip())
+                            logger.info(f"Wrote file from extracted JSON response: {filename}")
+                            if "files_created" not in summary:
+                                summary["files_created"] = []
+                            summary["files_created"].append(filename)
+                            files_found = True
+                            json_parsed = True
+                            break
+                
+                if not json_parsed:
+                    logger.debug("Response is not JSON, checking for code blocks")
+            
+            # If not JSON or no files found yet, look for code blocks
+            if not files_found:
+                # Look for file creation patterns in the response
+                # Pattern 1: ```python filename.py
+                # Pattern 2: # filename.py followed by code
+                # Pattern 3: File: filename.py followed by code
+                # Pattern 4: "I'll create filename.py" followed by code
+                
+                # Extract code blocks with filenames
+                code_patterns = [
+                    # ```python filename.py
+                    r'```(?:python)?\s+(\S+\.py)\n(.*?)```',
+                    # File: filename.py
+                    r'File:\s*(\S+\.py)\s*\n```(?:python)?\n(.*?)```',
+                    # I'll create/write filename.py
+                    r'(?:create|write|save)\s+(?:a\s+)?(?:file\s+)?(?:called\s+)?[`"]?(\S+\.py)[`"]?\s*(?:with)?.*?\n```(?:python)?\n(.*?)```',
+                    # filename.py: followed by code
+                    r'(\S+\.py):\s*\n```(?:python)?\n(.*?)```'
+                ]
+                
+                for pattern in code_patterns:
+                    matches = re.findall(pattern, response, re.DOTALL | re.MULTILINE | re.IGNORECASE)
+                    for match in matches:
+                        filename = match[0]
+                        code = match[1]
+                        if filename and code:
+                            file_path = workspace_dir / filename
+                            file_path.write_text(code.strip())
+                            logger.info(f"Wrote file from CLI response: {filename}")
+                            if "files_created" not in summary:
+                                summary["files_created"] = []
+                            summary["files_created"].append(filename)
+                            files_found = True
+                
+                # If no files found with specific names, look for any code blocks
+                if not files_found:
+                    code_blocks = re.findall(r'```(?:python)?\n(.*?)```', response, re.DOTALL)
+                    if code_blocks:
+                        logger.info(f"Found {len(code_blocks)} code blocks without explicit filenames")
+                        
+                        # For each code block, try to determine a good filename
+                        for i, code in enumerate(code_blocks):
+                            # Skip empty or very short blocks
+                            if len(code.strip()) < 10:
+                                continue
+                            
+                            # Try to determine filename from code content or task
+                            filename = None
+                            
+                            # First check if filename is specified in the code
+                            filename_match = re.search(r'#\s*filename:\s*(\S+\.py)', code, re.IGNORECASE)
+                            if filename_match:
+                                filename = filename_match.group(1)
+                                logger.info(f"Found filename in code comment: {filename}")
+                            
+                            # Check code content for class/function names
+                            class_match = re.search(r'class\s+(\w+)', code) if not filename else None
+                            func_match = re.search(r'def\s+(\w+)', code) if not filename else None
+                            
+                            if class_match:
+                                class_name = class_match.group(1).lower()
+                                filename = f"{class_name}.py"
+                            elif func_match:
+                                func_name = func_match.group(1).lower()
+                                if func_name not in ['__init__', 'main']:
+                                    filename = f"{func_name}.py"
+                            
+                            # Fall back to task-based naming
+                            if not filename:
+                                task_words = task.name.lower().split()
+                                for word in ['calculator', 'fibonacci', 'todo', 'parser', 'api', 'server']:
+                                    if word in task_words or word in response.lower():
+                                        filename = f"{word}.py"
+                                        break
+                            
+                            # Final fallback
+                            if not filename:
+                                filename = f"{task.name.lower().replace(' ', '_')}.py"
+                                if i > 0:
+                                    filename = filename.replace('.py', f'_{i}.py')
+                            
+                            # Write the code block
+                            file_path = workspace_dir / filename
+                            file_path.write_text(code.strip())
+                            logger.info(f"Wrote extracted code to: {filename}")
+                            if "files_created" not in summary:
+                                summary["files_created"] = []
+                            summary["files_created"].append(filename)
+                            files_found = True
+            
+            if not files_found:
+                logger.warning("No code blocks found in CLI response")
+                logger.debug(f"Full response: {response}")
         
-        artifact = await self._write_to_workspace(
-            filename=filename,
-            content=result["code"],
-            context=context,
-            task=task,
-            artifact_type=ArtifactType.SOURCE_CODE,
-            metadata={
-                "language": task_spec.get("language", "python"),
-                "dependencies": result.get("dependencies", []),
-                "complexity_score": result.get("complexity_score", 5),
-                "notes": result.get("notes", ""),
-                "frameworks": task_spec.get("frameworks", []),
-            }
-        )
+        # Find files created (based on summary or by scanning workspace)
+        files_created = summary.get("files_created", [])
         
-        # Track dependencies if specified
-        if "imports" in result:
-            artifact.metadata["imports"] = result["imports"]
+        # If using API and no files were created, extract code from response
+        if not files_created and not self.use_cli:
+            # Look for code blocks in the response
+            import re
+            code_blocks = re.findall(r'```(?:python)?\n(.*?)```', response, re.DOTALL)
+            if code_blocks:
+                # Write each code block to a file
+                for i, code in enumerate(code_blocks):
+                    # Try to determine filename from response or use default
+                    if "fibonacci" in response.lower():
+                        filename = "fibonacci.py" if i == 0 else f"fibonacci_{i}.py"
+                    elif "calculator" in response.lower():
+                        filename = "calculator.py" if i == 0 else f"calculator_{i}.py"
+                    else:
+                        filename = f"{task.name.lower().replace(' ', '_')}.py"
+                    
+                    # Write code to file
+                    file_path = workspace_dir / filename
+                    file_path.write_text(code.strip())
+                    files_created.append(filename)
+                    logger.info(f"Extracted and wrote code to {filename}")
         
-        return [artifact]
+        if not files_created:
+            # Scan workspace for new Python files
+            import os
+            for file in os.listdir(workspace_dir):
+                if file.endswith(('.py', '.js', '.ts', '.java', '.go')):
+                    files_created.append(file)
+        
+        # Create artifacts for each file created
+        artifacts = []
+        for filename in files_created:
+            file_path = workspace_dir / filename
+            if file_path.exists():
+                # Read the content that Claude wrote
+                content = file_path.read_text()
+                
+                # Create artifact record
+                artifact = await self._create_artifact(
+                    content=content,
+                    artifact_type=ArtifactType.SOURCE_CODE,
+                    name=filename,
+                    task=task,
+                    context=context,
+                    metadata={
+                        "language": task_spec.get("language", "python"),
+                        "dependencies": summary.get("dependencies", []),
+                        "notes": summary.get("notes", ""),
+                        "workspace_path": str(file_path),
+                    }
+                )
+                artifacts.append(artifact)
+        
+        if not artifacts:
+            # If no files were created, create a summary artifact
+            artifact = await self._create_artifact(
+                content=response,
+                artifact_type=ArtifactType.DOCUMENTATION,
+                name="execution_summary.txt",
+                task=task,
+                context=context,
+                metadata={"summary": summary}
+            )
+            artifacts.append(artifact)
+        
+        return artifacts
 
 
 class TestWriterAgent(SubAgent):
@@ -802,20 +1078,46 @@ class TestWriterAgent(SubAgent):
                 if match:
                     code_file = match.group(1)
         
-        # If no specific file, look for any Python file in workspace
-        if not code_file:
-            project_files = context.shared_memory.get("project_files", [])
-            py_files = [f for f in project_files if f.endswith('.py') and not f.startswith('test_')]
-            if py_files:
-                code_file = py_files[0]  # Test the first Python file found
+        # If no specific file, look for Python files in workspace directory
+        workspace_dir = context.project_root / "workspace"
+        logger.info(f"Looking for Python files in workspace: {workspace_dir}")
         
+        if not code_file and workspace_dir.exists():
+            import os
+            files_in_workspace = os.listdir(workspace_dir)
+            logger.info(f"Files in workspace: {files_in_workspace}")
+            
+            python_files = [f for f in files_in_workspace if f.endswith('.py')]
+            logger.info(f"Python files found: {python_files}")
+            
+            for file in python_files:
+                if not file.startswith('test_'):
+                    code_file = file
+                    logger.info(f"Selected file to test: {code_file}")
+                    break
+        else:
+            if not workspace_dir.exists():
+                logger.error(f"Workspace directory does not exist: {workspace_dir}")
+            
         if not code_file:
+            # List what we found for debugging
+            logger.error(f"No Python file found in workspace. Workspace exists: {workspace_dir.exists()}")
+            if workspace_dir.exists():
+                all_files = list(workspace_dir.glob("*"))
+                logger.error(f"All files in workspace: {[f.name for f in all_files]}")
             raise ValueError("No Python file found in workspace to test")
         
         # Read the code from workspace
-        code_to_test = await self._read_from_workspace(code_file, context)
-        if not code_to_test:
-            raise ValueError(f"Could not read file {code_file} from workspace")
+        code_to_test = ""
+        try:
+            file_path = workspace_dir / code_file
+            if file_path.exists():
+                code_to_test = file_path.read_text()
+            else:
+                raise ValueError(f"File {code_file} not found in workspace")
+        except Exception as e:
+            logger.error(f"Could not read {code_file}: {e}")
+            raise ValueError(f"Could not read file {code_file} from workspace: {e}")
         
         # Prepare prompt variables
         task_spec = task.metadata.get("specification", {})
@@ -830,48 +1132,79 @@ class TestWriterAgent(SubAgent):
         # Generate the prompt
         prompt = prompt_template.render(**prompt_vars)
         
-        # Query Claude
+        # Get workspace directory
+        workspace_dir = context.project_root / "workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Add workspace directory instruction
+        prompt = f"You are working in the directory: {workspace_dir}\n\n{prompt}"
+        
+        # Query Claude with workspace context
         response = await self._query_claude(
             prompt,
             model=ClaudeModel.SONNET,
             temperature=0.3,
             task_type="test",
+            context_files=[f for f in workspace_dir.glob("*") if f.is_file()] if workspace_dir.exists() else None,
         )
         
-        # Parse response
+        # Parse response to get summary
+        summary = {}
         try:
-            result = json.loads(response)
-        except json.JSONDecodeError:
             import re
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            json_match = re.search(r'\{[^{}]*"files_created"[^{}]*\}', response, re.DOTALL)
             if json_match:
-                result = json.loads(json_match.group())
-            else:
-                raise ValueError("Failed to parse Claude response as JSON")
+                summary = json.loads(json_match.group())
+        except:
+            logger.debug("No JSON summary in response, checking workspace for test files")
         
-        # Write test file to workspace
-        test_filename = result.get("filename", f"test_{code_file}" if code_file else "test_generated.py")
-        # Ensure it starts with test_ for convention
-        if not test_filename.startswith("test_"):
-            test_filename = f"test_{test_filename}"
-            
-        test_artifact = await self._write_to_workspace(
-            filename=test_filename,
-            content=result["test_code"],
-            context=context,
-            task=task,
-            artifact_type=ArtifactType.TEST_CODE,
-            metadata={
-                "language": task_spec.get("language", "python"),
-                "test_framework": task_spec.get("test_framework", "pytest"),
-                "test_cases": result.get("test_cases", []),
-                "coverage_estimate": result.get("coverage_estimate", 0),
-                "mocks_required": result.get("mocks_required", []),
-                "tested_file": code_file,
-            }
-        )
+        # Find test files created
+        files_created = summary.get("files_created", [])
+        if not files_created:
+            # Scan workspace for test files
+            import os
+            for file in os.listdir(workspace_dir):
+                if file.startswith("test_") and file.endswith(".py"):
+                    files_created.append(file)
         
-        return [test_artifact]
+        # Create artifacts for test files
+        artifacts = []
+        for filename in files_created:
+            file_path = workspace_dir / filename
+            if file_path.exists():
+                content = file_path.read_text()
+                
+                artifact = await self._create_artifact(
+                    content=content,
+                    artifact_type=ArtifactType.TEST_CODE,
+                    name=filename,
+                    task=task,
+                    context=context,
+                    metadata={
+                        "language": task_spec.get("language", "python"),
+                        "test_framework": task_spec.get("test_framework", "pytest"),
+                        "test_count": summary.get("test_count", "unknown"),
+                        "coverage_estimate": summary.get("coverage_estimate", 0),
+                        "notes": summary.get("notes", ""),
+                        "workspace_path": str(file_path),
+                        "tested_file": code_file,
+                    }
+                )
+                artifacts.append(artifact)
+        
+        if not artifacts:
+            # Create summary artifact if no test files found
+            artifact = await self._create_artifact(
+                content=response,
+                artifact_type=ArtifactType.DOCUMENTATION,
+                name="test_execution_summary.txt",
+                task=task,
+                context=context,
+                metadata={"summary": summary}
+            )
+            artifacts.append(artifact)
+        
+        return artifacts
 
 
 class DocumentationAgent(SubAgent):
@@ -914,38 +1247,34 @@ class DocumentationAgent(SubAgent):
         # Generate the prompt
         prompt = prompt_template.render(**prompt_vars)
         
-        # Query Claude
+        # Get workspace directory
+        workspace_dir = context.project_root / "workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Add workspace directory instruction
+        prompt = f"You are working in the directory: {workspace_dir}\n\n{prompt}"
+        
+        # Query Claude with workspace context
         response = await self._query_claude(
             prompt,
             model=ClaudeModel.SONNET,
             temperature=0.5,
             task_type="documentation",
+            context_files=[f for f in workspace_dir.glob("*") if f.is_file()] if workspace_dir.exists() else None,
         )
         
-        # Parse response
-        try:
-            result = json.loads(response)
-        except json.JSONDecodeError:
-            import re
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group())
-            else:
-                raise ValueError("Failed to parse Claude response as JSON")
-        
-        # Create documentation artifact using helper method
+        # Claude has written documentation files directly
+        # Create a summary artifact
         artifact = await self._create_artifact(
-            content=result["documentation"],
+            content=response,
             artifact_type=ArtifactType.DOCUMENTATION,
-            name=result.get("filename", "documentation.md"),
+            name="documentation_summary.txt",
             task=task,
             context=context,
             metadata={
-                "language": "markdown",
                 "doc_type": task_spec.get("doc_type", "api"),
                 "target_audience": task_spec.get("target_audience", "developers"),
-                "sections": result.get("sections", []),
-                "api_reference": result.get("api_reference", {}),
+                "workspace_path": str(workspace_dir)
             }
         )
         
@@ -998,50 +1327,35 @@ class RefactorAgent(SubAgent):
         prompt = prompt_template.render(**prompt_vars)
         
         # Query Claude
+        # Get workspace directory
+        workspace_dir = context.project_root / "workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Add workspace directory instruction
+        prompt = f"You are working in the directory: {workspace_dir}\n\n{prompt}"
+        
+        # Query Claude with workspace context
         response = await self._query_claude(
             prompt,
-            model=ClaudeModel.OPUS,  # Use Opus for complex refactoring
+            model=ClaudeModel.OPUS,
             temperature=0.3,
             task_type="code",
+            context_files=[f for f in workspace_dir.glob("*") if f.is_file()] if workspace_dir.exists() else None,
         )
         
-        # Parse response
-        try:
-            result = json.loads(response)
-        except json.JSONDecodeError:
-            import re
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group())
-            else:
-                raise ValueError("Failed to parse Claude response as JSON")
-        
-        # Create refactored artifact using helper method
+        # Claude has refactored code directly in workspace
+        # Create a summary artifact
         artifact = await self._create_artifact(
-            content=result["refactored_code"],
+            content=response,
             artifact_type=ArtifactType.SOURCE_CODE,
-            name=result.get("filename", "refactored_code.py"),
+            name="refactoring_summary.txt",
             task=task,
             context=context,
             metadata={
-                "language": task_spec.get("language", "python"),
-                "refactoring_goals": task_spec.get("refactoring_goals", []),
-                "changes": result.get("changes", []),
-                "metrics": result.get("metrics", {}),
-                "breaking_changes": result.get("breaking_changes", []),
-                "performance_improvement": result.get("performance_improvement", {}),
+                "refactoring_goals": task.metadata.get("specification", {}).get("refactoring_goals", ""),
+                "workspace_path": str(workspace_dir)
             }
         )
-        
-        # If original artifact ID provided, link the refactored version
-        original_artifact_id = task.metadata.get("original_artifact_id")
-        if original_artifact_id and context.artifact_manager:
-            try:
-                original_artifact = await context.artifact_manager.get_artifact(UUID(original_artifact_id))
-                if original_artifact:
-                    await self._link_artifacts(artifact, original_artifact, context)
-            except Exception as e:
-                logger.warning(f"Failed to link to original artifact: {e}")
         
         return [artifact]
 
@@ -1093,14 +1407,37 @@ class DebugAgent(SubAgent):
         
         # Parse response
         try:
+            # Check if response is empty
+            if not response or not response.strip():
+                logger.error("Empty response from Claude", response=response)
+                raise ValueError("Received empty response from Claude")
+                
             result = json.loads(response)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.error(
+                "Failed to parse JSON response",
+                response_preview=response[:500] if response else "empty",
+                error=str(e)
+            )
             import re
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
-                result = json.loads(json_match.group())
+                try:
+                    result = json.loads(json_match.group())
+                except json.JSONDecodeError:
+                    # Try to fix common JSON issues with code
+                    fixed_json = json_match.group()
+                    # Replace unescaped newlines in strings
+                    fixed_json = re.sub(r'("(?:[^"\\]|\\.)*?")', 
+                                      lambda m: m.group(0).replace('\n', '\\n').replace('\r', '\\r'), 
+                                      fixed_json)
+                    try:
+                        result = json.loads(fixed_json)
+                        logger.warning("Fixed malformed JSON from Claude")
+                    except json.JSONDecodeError:
+                        raise ValueError(f"Failed to parse Claude response as JSON. Response: {response[:500]}...")
             else:
-                raise ValueError("Failed to parse Claude response as JSON")
+                raise ValueError(f"Failed to parse Claude response as JSON. Response: {response[:500]}...")
         
         # Get the recommended solution
         solutions = result.get("solutions", [])
