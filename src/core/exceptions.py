@@ -539,3 +539,52 @@ class MissingConfigurationError(ConfigurationError):
             error_code="MISSING_CONFIG",
             details=details,
         )
+
+
+# Subprocess-related exceptions
+class SubprocessError(AgenticSystemError):
+    """Base exception for subprocess execution errors."""
+    
+    pass
+
+
+class SubprocessTimeoutError(SubprocessError):
+    """Raised when subprocess execution times out."""
+    
+    def __init__(self, command: str, timeout: int):
+        """Initialize timeout error.
+        
+        Args:
+            command: Command that timed out
+            timeout: Timeout duration in seconds
+        """
+        super().__init__(
+            f"Subprocess timed out after {timeout}s: {command}",
+            error_code="SUBPROCESS_TIMEOUT",
+            details={
+                "command": command,
+                "timeout_seconds": timeout,
+            },
+        )
+
+
+class SubprocessMemoryError(SubprocessError):
+    """Raised when subprocess exceeds memory limit."""
+    
+    def __init__(self, command: str, memory_limit_mb: int, actual_mb: float):
+        """Initialize memory error.
+        
+        Args:
+            command: Command that exceeded memory
+            memory_limit_mb: Memory limit in MB
+            actual_mb: Actual memory usage in MB
+        """
+        super().__init__(
+            f"Subprocess exceeded memory limit: {actual_mb:.1f}MB > {memory_limit_mb}MB",
+            error_code="SUBPROCESS_MEMORY_EXCEEDED",
+            details={
+                "command": command,
+                "memory_limit_mb": memory_limit_mb,
+                "actual_memory_mb": actual_mb,
+            },
+        )

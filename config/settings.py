@@ -34,9 +34,9 @@ class LogLevel(str, Enum):
 class ClaudeModel(str, Enum):
     """Available Claude model variants."""
     
-    OPUS = "claude-3-opus-20240229"
-    SONNET = "claude-3-sonnet-20240229"
-    HAIKU = "claude-3-haiku-20240307"
+    OPUS = "claude-3-5-opus-latest"
+    SONNET = "claude-3-5-sonnet-latest"
+    HAIKU = "claude-3-5-haiku-latest"
 
 
 class APISettings(BaseModel):
@@ -53,17 +53,37 @@ class APISettings(BaseModel):
     rate_limit_per_minute: int = Field(default=50, description="Rate limit per minute")
 
 
+class OpenAISettings(BaseModel):
+    """OpenAI API configuration."""
+    
+    key: SecretStr = Field(..., description="OpenAI API key")
+    model: str = Field(
+        default="gpt-4-turbo-preview",
+        description="Default OpenAI model"
+    )
+    meta_agent_model: str = Field(
+        default="o3",  # Will use gpt-4-turbo-preview until o3 is available
+        description="Model for meta agent (orchestrator)"
+    )
+    timeout: int = Field(default=300, description="API request timeout in seconds")
+    max_retries: int = Field(default=3, description="Maximum retry attempts")
+
+
 class AgentSettings(BaseModel):
     """Agent system configuration."""
     
     max_parallel_agents: int = Field(default=10, description="Maximum concurrent agents")
+    use_openai_for_meta_agent: bool = Field(
+        default=True,
+        description="Use OpenAI instead of Claude for meta agent"
+    )
     default_model: ClaudeModel = Field(
         default=ClaudeModel.SONNET,
         description="Default Claude model for agents"
     )
     meta_agent_model: ClaudeModel = Field(
         default=ClaudeModel.OPUS,
-        description="Model for meta agent (orchestrator)"
+        description="Model for meta agent (orchestrator) when using Claude"
     )
     verification_timeout: int = Field(
         default=600,
@@ -73,9 +93,105 @@ class AgentSettings(BaseModel):
         default=5,
         description="Maximum repair loop iterations"
     )
+    
+    # Retry configuration
+    task_max_retries: int = Field(
+        default=3,
+        description="Maximum retry attempts per task"
+    )
+    task_retry_delay: float = Field(
+        default=2.0,
+        description="Base delay between retries in seconds"
+    )
+    task_retry_backoff: float = Field(
+        default=2.0,
+        description="Exponential backoff multiplier for retries"
+    )
+    retry_on_verification_failure: bool = Field(
+        default=True,
+        description="Retry tasks that fail verification"
+    )
+    retry_on_api_errors: bool = Field(
+        default=True,
+        description="Retry on API rate limits and timeouts"
+    )
+    retry_on_compilation_errors: bool = Field(
+        default=False,
+        description="Retry on compilation errors (usually permanent)"
+    )
+    diagnose_failures: bool = Field(
+        default=True,
+        description="Enable intelligent failure diagnosis"
+    )
+    adaptive_retry_prompts: bool = Field(
+        default=True,
+        description="Modify prompts based on failure analysis"
+    )
+    
     context_window_buffer: int = Field(
         default=1000,
         description="Token buffer to prevent context overflow"
+    )
+
+
+class CLISettings(BaseModel):
+    """Claude Code configuration."""
+    
+    use_cli_for_subagents: bool = Field(
+        default=False,
+        description="Enable CLI mode for sub-agents"
+    )
+    cli_path: str = Field(
+        default="claude",
+        description="Path to Claude Code executable"
+    )
+    mcp_config_path: str = Field(
+        default="mcp-config.json",
+        description="Path to MCP configuration file"
+    )
+    cli_timeout_seconds: int = Field(
+        default=600,
+        description="CLI execution timeout"
+    )
+    cli_max_memory_mb: int = Field(
+        default=2048,
+        description="Maximum memory for CLI processes"
+    )
+    cli_stream_output: bool = Field(
+        default=True,
+        description="Stream CLI output to prevent memory issues"
+    )
+    
+    # Quality gates for CLI output
+    enable_quality_gates: bool = Field(
+        default=True,
+        description="Enable quality validation for CLI outputs"
+    )
+    min_code_quality_score: float = Field(
+        default=0.8,
+        description="Minimum acceptable code quality score"
+    )
+    min_test_coverage: float = Field(
+        default=0.7,
+        description="Minimum test coverage for CLI outputs"
+    )
+    max_security_issues: int = Field(
+        default=0,
+        description="Maximum allowed security issues"
+    )
+    
+    # Feedback loop configuration
+    enable_feedback_loop: bool = Field(
+        default=True,
+        description="Enable iterative improvement through feedback"
+    )
+    max_improvement_iterations: int = Field(
+        default=3,
+        description="Maximum feedback loop iterations"
+    )
+    feedback_score_threshold: float = Field(
+        default=0.95,
+        description="Target quality score for feedback loop"
     )
 
 
@@ -158,6 +274,47 @@ class LoggingSettings(BaseModel):
     include_context: bool = Field(default=True)
 
 
+class ObservabilitySettings(BaseModel):
+    """Observability and monitoring configuration."""
+    
+    enable_metrics: bool = Field(
+        default=True,
+        description="Enable Prometheus metrics collection"
+    )
+    metrics_port: int = Field(
+        default=8000,
+        description="Port for metrics HTTP server"
+    )
+    enable_structured_logging: bool = Field(
+        default=True,
+        description="Enable enhanced structured logging"
+    )
+    enable_performance_tracking: bool = Field(
+        default=True,
+        description="Enable automatic performance tracking"
+    )
+    metrics_collection_interval: int = Field(
+        default=10,
+        description="Metrics collection interval in seconds"
+    )
+    enable_system_metrics: bool = Field(
+        default=True,
+        description="Enable system resource metrics"
+    )
+    enable_agent_metrics: bool = Field(
+        default=True,
+        description="Enable agent performance metrics"
+    )
+    enable_api_metrics: bool = Field(
+        default=True,
+        description="Enable API usage metrics"
+    )
+    enable_verification_metrics: bool = Field(
+        default=True,
+        description="Enable verification system metrics"
+    )
+
+
 class Settings(BaseSettings):
     """Main application settings.
     
@@ -190,16 +347,22 @@ class Settings(BaseSettings):
     
     # Component settings
     api: APISettings
+    openai: Optional[OpenAISettings] = None
     agent: AgentSettings = Field(default_factory=AgentSettings)
+    cli: CLISettings = Field(default_factory=CLISettings)
     verification: VerificationSettings = Field(default_factory=VerificationSettings)
     learning: LearningSettings = Field(default_factory=LearningSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     
     # Performance settings
     enable_profiling: bool = Field(default=False)
     enable_metrics: bool = Field(default=True)
     metrics_port: int = Field(default=9090)
+    
+    # MCP settings
+    mcp_config_path: str = Field(default="mcp-config.json", description="Path to MCP configuration file")
     
     @validator("storage")
     def ensure_storage_path(cls, v: StorageSettings) -> StorageSettings:

@@ -21,10 +21,17 @@ USER REQUEST:
 Analyze this request and break it down into discrete, executable tasks. THE OUTPUT MUST BE IN THE JSON FORMAT SPECIFIED BELOW. For each task:
 
 1. Identify the specific deliverable or outcome
-2. Determine dependencies on other tasks
+2. Determine dependencies on other tasks - CRITICAL: Testing tasks MUST depend on core_logic tasks that create the code to test. Documentation tasks MUST depend on the tasks that create what they document.
 3. Estimate complexity (simple/medium/complex)
 4. Identify the most suitable agent type (core_logic/testing/documentation/optimization)
 5. Specify any special requirements or constraints
+
+DEPENDENCY RULES:
+- Testing tasks CANNOT run before core_logic tasks that create the code
+- Documentation tasks CANNOT run before the tasks they document
+- Optimization tasks CANNOT run before the code exists
+- CRITICAL: In the "dependencies" array, you MUST use the EXACT task name as it appears in another task's "name" field
+- DO NOT use shortened names, aliases, or different variations - copy the exact name string
 
 Output your analysis as a JSON object ONLY (no additional text before or after):
 {{
@@ -34,7 +41,7 @@ Output your analysis as a JSON object ONLY (no additional text before or after):
             "name": "Task name",
             "description": "Detailed task description",
             "deliverable": "What will be produced",
-            "dependencies": ["names of tasks this depends on"],
+            "dependencies": ["EXACT names of tasks this depends on - must match another task's 'name' field exactly"],
             "complexity": "simple|medium|complex",
             "agent_type": "core_logic|testing|documentation|optimization",
             "estimated_time_minutes": 10,
@@ -52,7 +59,75 @@ Output your analysis as a JSON object ONLY (no additional text before or after):
     }}
 }}
 
-Be thorough and ensure all tasks are atomic and clearly defined.""",
+Be thorough and ensure all tasks are atomic and clearly defined.
+
+CRITICAL: Tasks must have proper dependencies! Testing cannot happen before implementation!
+
+EXAMPLE for "Create a calculator with tests":
+{{
+    "project_summary": "A calculator application with unit tests",
+    "tasks": [
+        {{
+            "name": "Implement calculator logic",
+            "description": "Create the core calculator functions",
+            "deliverable": "calculator.py with add, subtract, multiply, divide functions",
+            "dependencies": [],
+            "complexity": "simple",
+            "agent_type": "core_logic",
+            "estimated_time_minutes": 15,
+            "requirements": {{"language": "python"}}
+        }},
+        {{
+            "name": "Write calculator tests",
+            "description": "Create unit tests for calculator functions",
+            "deliverable": "test_calculator.py with comprehensive tests",
+            "dependencies": ["Implement calculator logic"],
+            "complexity": "simple",
+            "agent_type": "testing",
+            "estimated_time_minutes": 20,
+            "requirements": {{"language": "python", "frameworks": ["pytest"]}}
+        }}
+    ]
+}}
+
+Another EXAMPLE for "Create hello world script with tests":
+{{
+    "project_summary": "A simple hello world Python script with tests",
+    "tasks": [
+        {{
+            "name": "Create hello world script",
+            "description": "Implement the main hello world Python script",
+            "deliverable": "hello_world.py",
+            "dependencies": [],
+            "complexity": "simple",
+            "agent_type": "core_logic",
+            "estimated_time_minutes": 5,
+            "requirements": {{"language": "python"}}
+        }},
+        {{
+            "name": "Write tests for hello world",
+            "description": "Create unit tests for the hello world script",
+            "deliverable": "test_hello_world.py",
+            "dependencies": ["Create hello world script"],  // EXACT name from above task
+            "complexity": "simple",
+            "agent_type": "testing",
+            "estimated_time_minutes": 10,
+            "requirements": {{"language": "python", "frameworks": ["pytest"]}}
+        }},
+        {{
+            "name": "Document hello world script",
+            "description": "Write documentation for the hello world script",
+            "deliverable": "README.md",
+            "dependencies": ["Create hello world script"],  // EXACT name, not "create_script" or other variation
+            "complexity": "simple",
+            "agent_type": "documentation",
+            "estimated_time_minutes": 5,
+            "requirements": {{"language": "markdown"}}
+        }}
+    ]
+}}
+
+IMPORTANT: Notice how dependencies use the EXACT task names. Never use shortened versions like "implement_script" when the task is named "Implement calculator logic"!""",
     variables=["user_request"],
 )
 

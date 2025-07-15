@@ -9,6 +9,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
+from uuid import UUID
 
 import orjson
 import structlog
@@ -375,6 +376,67 @@ def log_execution_time(func_name: str) -> Any:
             return sync_wrapper
     
     return decorator
+
+
+def log_task_retry(task_id: UUID, retry_count: int, reason: str, strategy: str) -> None:
+    """Log task retry attempt with full context.
+    
+    Args:
+        task_id: Task ID
+        retry_count: Current retry attempt number
+        reason: Reason for retry
+        strategy: Retry strategy being used
+    """
+    logger = get_logger(__name__)
+    logger.info(
+        "task_retry",
+        task_id=str(task_id),
+        retry_count=retry_count,
+        reason=reason,
+        strategy=strategy,
+        event_type="retry_attempt"
+    )
+
+
+def log_failure_diagnosis(task_id: UUID, diagnosis: 'ErrorDiagnosis') -> None:
+    """Log detailed failure analysis.
+    
+    Args:
+        task_id: Task ID
+        diagnosis: Error diagnosis object
+    """
+    logger = get_logger(__name__)
+    logger.error(
+        "failure_diagnosis",
+        task_id=str(task_id),
+        error_type=diagnosis.error_type.value,
+        is_retryable=diagnosis.is_retryable,
+        retry_strategy=diagnosis.retry_strategy.value,
+        suggested_fix=diagnosis.suggested_fix,
+        confidence=diagnosis.confidence,
+        patterns_matched=diagnosis.patterns_matched,
+        event_type="error_diagnosis"
+    )
+
+
+def generate_failure_report(execution_id: str) -> Dict[str, Any]:
+    """Generate comprehensive failure report from logs.
+    
+    Args:
+        execution_id: Execution ID to filter logs
+        
+    Returns:
+        Failure report dictionary
+    """
+    # This would typically query a log aggregation service
+    # For now, return a placeholder structure
+    return {
+        "execution_id": execution_id,
+        "timestamp": datetime.utcnow().isoformat(),
+        "failures": [],
+        "retry_summary": {},
+        "recommendations": []
+    }
 
 
 # Initialize logging on module import if settings are available

@@ -1,335 +1,575 @@
-# Agentic Coding System
+# Autonomous AI Coding System
 
-An advanced autonomous coding system that uses multiple Claude instances to generate, verify, and improve code through intelligent agents. The system employs a hierarchical agent structure with parallel processing capabilities and comprehensive verification loops to achieve 100% code quality.
+A sophisticated multi-agent system that uses Claude AI to autonomously generate, verify, and improve code through intelligent orchestration and continuous verification loops.
 
-## Features
+## Project Overview
 
-- **Hierarchical Agent Architecture**: Meta agent orchestrates specialized sub-agents for different tasks
-- **Parallel Task Execution**: Multiple agents work simultaneously on independent tasks
-- **Comprehensive Verification**: Dual verification system with compilation and test checks
-- **Continuous Learning**: Learns from execution patterns to improve future performance
-- **Prompt Evolution**: Dynamic prompt refinement based on task outcomes
-- **Robust Error Handling**: Automatic repair loops for failed tasks
-- **Production-Ready**: Async support, rate limiting, retry logic, and extensive logging
+The **Autonomous AI Coding System** is a production-ready platform that coordinates multiple AI agents to create complete software projects. The system employs a hierarchical architecture with specialized agents that work together to achieve 100% code quality through continuous verification and automated repair loops.
+
+### Key Features
+
+- **Multi-Agent Architecture**: Hierarchical system with Meta Agent orchestration and specialized Sub-Agents
+- **Continuous Verification**: Dual verification system (compilation + testing) ensures code quality
+- **Intelligent Repair**: Automated failure analysis and repair loops
+- **Parallel Processing**: Multiple agents work simultaneously for efficiency
+- **Comprehensive Artifacts**: Version-controlled storage of all generated code
+- **Production Ready**: Async processing, error handling, monitoring, and observability
 
 ## Architecture Overview
 
-```
-┌─────────────────┐
-│   Meta Agent    │ ← Orchestrates entire system
-└────────┬────────┘
-         │
-    ┌────┴────────────────────────────┐
-    │                                  │
-┌───▼─────┐ ┌───────────┐ ┌──────────▼─┐ ┌──────────────┐
-│  Core   │ │  Testing  │ │    Doc     │ │ Optimization │
-│  Logic  │ │   Agent   │ │   Agent    │ │    Agent     │
-│  Agent  │ │           │ │            │ │              │
-└─────────┘ └───────────┘ └────────────┘ └──────────────┘
-    │            │              │               │
-    └────────────┴──────┬───────┴───────────────┘
-                        │
-                ┌───────▼────────┐
-                │   Artifacts    │
-                │   Management   │
-                └───────┬────────┘
-                        │
-              ┌─────────┴──────────┐
-              │                    │
-        ┌─────▼──────┐      ┌─────▼──────┐
-        │ Compiler   │      │    Test    │
-        │ Verifier   │      │  Verifier  │
-        └────────────┘      └────────────┘
-```
+### Core Components
 
-## Quick Start
+1. **Meta Agent (Task Manager)**
+   - Orchestrates the entire system using OpenAI O3 for task decomposition
+   - Coordinates multiple sub-agents and manages global context
+   - Implements intelligent retry and repair mechanisms
+
+2. **Sub-Agents** (Always use Claude Code)
+   - **Core Logic Agent**: Generates main application code
+   - **Testing Agent**: Creates comprehensive test suites
+   - **Documentation Agent**: Writes documentation and README files
+   - **Optimization Agent**: Improves code performance and quality
+   - **Verification Agent**: Validates code and runs quality checks
+
+3. **Verification System**
+   - **Compiler Verification**: Syntax checking and compilation validation
+   - **Test Verification**: Automated test execution and coverage analysis
+   - **Quality Gates**: Configurable quality thresholds
+
+4. **Artifact Management**
+   - Version-controlled storage with compression
+   - Dependency tracking and metadata management
+   - Hierarchical organization with UUID-based indexing
+
+5. **Communication Hub**
+   - Inter-agent messaging and coordination
+   - Shared context management
+   - Event-driven architecture
+
+## Installation & Setup
 
 ### Prerequisites
 
 - Python 3.9 or higher
-- Anthropic API key
+- Anthropic API key (for Claude)
+- OpenAI API key (for Meta Agent)
+- Claude Code CLI tool installed
 
-### Installation
+### Installation Steps
 
-1. Clone the repository:
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/agentic-system/agentic-coding-system.git
+   cd agentic-coding-system
+   ```
+
+2. **Set up virtual environment**
+   ```bash
+   python -m venv agentic-env
+   source agentic-env/bin/activate  # On Windows: agentic-env\Scripts\activate
+   ```
+
+3. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   # Or using pyproject.toml
+   pip install -e .
+   ```
+
+4. **Configure environment variables**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API keys:
+   # ANTHROPIC_API_KEY=your_claude_api_key
+   # OPENAI_API_KEY=your_openai_api_key
+   ```
+
+5. **Run health check**
+   ```bash
+   python scripts/health_check.py
+   ```
+
+### Development Setup
+
 ```bash
-git clone https://github.com/agentic-system/agentic-coding-system.git
-cd agentic-coding-system
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Install pre-commit hooks
+pre-commit install
+
+# Run code formatting
+black src/ tests/
+ruff check src/ tests/
+
+# Run type checking
+mypy src/
 ```
 
-2. Create a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Set up environment variables:
-```bash
-cp .env.example .env
-# Edit .env and add your Anthropic API key
-```
+## Usage Guide
 
 ### Basic Usage
 
 ```python
+from src.agents.meta_agent import MetaAgent
 import asyncio
-from src.clients.claude_client import ClaudeClient
-from config import get_settings, ClaudeModel
 
 async def main():
-    settings = get_settings()
+    meta_agent = MetaAgent()
     
-    # Initialize Claude client
-    async with ClaudeClient() as client:
-        # Create a message
-        response = await client.create_message(
-            model=ClaudeModel.SONNET,
-            messages=[
-                {"role": "user", "content": "Write a Python function to calculate fibonacci numbers"}
-            ],
-            max_tokens=1000,
-        )
-        
-        print(response.content[0].text)
+    # Simple code generation
+    result = await meta_agent.process_request(
+        "Create a Python calculator with tests"
+    )
+    
+    print(f"Project created: {result.project_id}")
+    print(f"Files generated: {len(result.artifacts)}")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
 ```
+
+### Command Line Interface
+
+```bash
+# Run a simple example
+python examples/basic_usage.py
+
+# Run the main demo
+python demo_agentic_system.py
+
+# Health check
+python scripts/health_check.py
+```
+
+### Advanced Usage
+
+```python
+from src.agents.meta_agent import MetaAgent
+from src.core.interfaces import TaskContext
+import asyncio
+
+async def advanced_example():
+    meta_agent = MetaAgent()
+    
+    # Create custom task context
+    context = TaskContext(
+        project_id="my-custom-project",
+        base_path="/path/to/workspace",
+        settings={
+            "max_parallel_tasks": 4,
+            "verification_enabled": True,
+            "test_coverage_threshold": 90
+        }
+    )
+    
+    # Process complex request
+    result = await meta_agent.process_request(
+        request="Create a REST API with PostgreSQL backend, include authentication, CRUD operations, and comprehensive tests",
+        context=context
+    )
+    
+    # Access results
+    for artifact in result.artifacts:
+        print(f"Generated: {artifact.file_path} ({artifact.type})")
+
+asyncio.run(advanced_example())
+```
+
+## Components Documentation
+
+### Meta Agent
+
+The Meta Agent serves as the central orchestrator:
+
+- **Task Decomposition**: Uses OpenAI O3 to break complex requests into manageable tasks
+- **Agent Coordination**: Manages sub-agent lifecycle and task assignment
+- **Quality Assurance**: Ensures 100% compilation and test success
+- **Failure Recovery**: Implements intelligent retry and repair mechanisms
+
+**Configuration Options**:
+- `max_parallel_tasks`: Maximum concurrent sub-agents (default: 3)
+- `retry_attempts`: Number of retry attempts for failed tasks (default: 3)
+- `verification_required`: Enable/disable verification loops (default: True)
+
+### Sub-Agents
+
+All sub-agents use Claude Code for enhanced capabilities:
+
+#### Core Logic Agent
+- Generates main application code
+- Implements business logic and data structures
+- Follows coding best practices and patterns
+
+#### Testing Agent
+- Creates comprehensive test suites
+- Generates unit, integration, and end-to-end tests
+- Ensures high code coverage
+
+#### Documentation Agent
+- Writes technical documentation
+- Creates README files and code comments
+- Generates API documentation
+
+### Verification System
+
+The verification system ensures code quality through multiple stages:
+
+1. **Syntax Verification**: AST parsing and syntax checking
+2. **Compilation Verification**: Full compilation testing
+3. **Test Execution**: Automated test running with coverage analysis
+4. **Quality Gates**: Configurable quality thresholds
+
+**Supported Languages**:
+- Python (pytest, coverage)
+- JavaScript (Jest, Mocha)
+- TypeScript (tsc, Jest)
+
+### Artifact Management
+
+All generated code is stored as versioned artifacts:
+
+- **Compression**: Gzip compression for efficient storage
+- **Metadata**: Full tracking of creation, modification, and dependencies
+- **Versioning**: Complete version history with rollback capabilities
+- **Integrity**: SHA256 checksums for corruption detection
 
 ## Configuration
 
-The system uses a hierarchical configuration approach:
+### Environment Variables
 
-1. **Environment Variables**: Highest priority, prefixed with `ACS_`
-2. **Configuration Files**: YAML files in the `config/` directory
-3. **Default Values**: Built-in defaults in the code
+```bash
+# API Configuration
+ANTHROPIC_API_KEY=your_claude_api_key
+OPENAI_API_KEY=your_openai_api_key
 
-### Key Configuration Options
+# System Configuration
+MAX_PARALLEL_TASKS=3
+VERIFICATION_ENABLED=true
+TEST_COVERAGE_THRESHOLD=90
 
-```yaml
-# config/settings.yaml
-api:
-  timeout: 300
-  max_retries: 3
-  rate_limit_per_minute: 50
+# Storage Configuration
+ARTIFACTS_BASE_PATH=./artifacts
+PROJECTS_BASE_PATH=./projects
 
-agent:
-  max_parallel_agents: 10
-  default_model: claude-3-sonnet-20240229
-  meta_agent_model: claude-3-opus-20240229
-  verification_timeout: 600
-  max_repair_attempts: 5
-
-verification:
-  enable_compilation_check: true
-  enable_test_verification: true
-  minimum_coverage: 90.0
-  strict_mode: true
-
-learning:
-  enable_learning: true
-  pattern_threshold: 3
-  memory_retention_days: 30
+# Logging Configuration
+LOG_LEVEL=INFO
+LOG_FORMAT=json
 ```
 
-## Development
+### Settings Files
 
-### Project Structure
+Configuration is managed through Pydantic settings:
+
+```python
+# config/settings.py
+class Settings(BaseSettings):
+    # API Settings
+    anthropic_api_key: str
+    openai_api_key: str
+    
+    # Agent Settings
+    max_parallel_tasks: int = 3
+    retry_attempts: int = 3
+    
+    # Verification Settings
+    verification_enabled: bool = True
+    test_coverage_threshold: int = 90
+    
+    class Config:
+        env_file = ".env"
+```
+
+## Testing
+
+### Test Structure
 
 ```
-agentic-coding-system/
-├── src/
-│   ├── core/           # Core interfaces and abstractions
-│   ├── agents/         # Agent implementations
-│   ├── clients/        # API clients (Claude)
-│   ├── verification/   # Verification system
-│   ├── learning/       # Learning engine
-│   ├── artifacts/      # Artifact management
-│   └── utils/          # Utilities and helpers
-├── tests/              # Test suite
-├── config/             # Configuration files
-├── docs/               # Documentation
-└── scripts/            # Utility scripts
+tests/
+├── unit/                   # Unit tests for individual components
+├── integration/           # Integration tests
+├── test_agents.py        # Agent system tests
+├── test_verification.py  # Verification system tests
+└── test_artifacts.py     # Artifact management tests
 ```
 
 ### Running Tests
 
 ```bash
-# Quick test run
-./run_tests.sh
+# Run all tests
+pytest
 
-# Run tests with coverage report
-./run_tests_with_coverage.sh
+# Run specific test categories
+pytest tests/unit/              # Unit tests only
+pytest tests/integration/       # Integration tests only
 
-# Run tests manually
-source agentic-env/bin/activate
-python -m pytest tests/ -v
+# Run with coverage
+pytest --cov=src --cov-report=html
 
-# Run with coverage manually
-python -m pytest tests/ --cov=src --cov-report=html
+# Run with verbose output
+pytest -v
+
+# Run specific test file
+pytest tests/test_agents.py -v
 ```
 
-### Code Quality
+### Test Configuration
 
 ```bash
-# Format code
-black src tests
-
-# Lint code
-ruff check src tests
-
-# Type checking
-mypy src
-```
-
-## Advanced Features
-
-### Artifact Management System
-
-The system includes a comprehensive artifact management system with versioning, caching, and dependency tracking:
-
-```python
-from src.core.artifact_manager import ArtifactManager
-from src.core.interfaces import Artifact, ArtifactType
-
-# Initialize artifact manager
-manager = ArtifactManager(
-    storage_path=Path("./artifacts"),
-    max_memory_cache_size=100,
-    enable_compression=True
-)
-await manager.initialize()
-
-# Store an artifact
-artifact = Artifact(
-    name="calculator.py",
-    type=ArtifactType.SOURCE_CODE,
-    content="def add(a, b): return a + b",
-    language="python"
-)
-stored = await manager.store_artifact(artifact)
-
-# Update creates a new version
-updated = await manager.update_artifact(
-    artifact.id,
-    new_content="def add(a, b): return a + b\ndef subtract(a, b): return a - b",
-    reason="Added subtract function"
-)
-
-# Retrieve specific version
-v1 = await manager.get_artifact(artifact.id, version=1)
-
-# Search artifacts
-results = await manager.search_artifacts(
-    language="python",
-    tags={"calculator"}
-)
-```
-
-Key features:
-- **Centralized Storage**: All artifacts in one managed location
-- **Version Control**: Git-like versioning with branches and merges
-- **Memory Caching**: LRU cache for frequently accessed artifacts
-- **Compression**: Optional gzip compression for storage efficiency
-- **Atomic Operations**: Thread-safe file operations
-- **Dependency Tracking**: Automatic dependency detection and impact analysis
-
-### Parallel Task Execution
-
-The system can execute multiple independent tasks simultaneously:
-
-```python
-from src.core.interfaces import Task, TaskPriority
-
-# Tasks are automatically parallelized when possible
-tasks = [
-    Task(name="Implement API endpoint", priority=TaskPriority.HIGH),
-    Task(name="Write unit tests", priority=TaskPriority.HIGH),
-    Task(name="Generate documentation", priority=TaskPriority.MEDIUM),
-]
-
-# Meta agent will assign these to different sub-agents for parallel execution
-```
-
-### Custom Verification Strategies
-
-Implement custom verifiers for specific requirements:
-
-```python
-from src.core.interfaces import Verifier, Artifact
-
-class SecurityVerifier(Verifier):
-    async def verify(self, artifact: Artifact) -> Dict[str, Any]:
-        # Custom security checks
-        vulnerabilities = await self.scan_for_vulnerabilities(artifact)
-        return {
-            "success": len(vulnerabilities) == 0,
-            "errors": vulnerabilities,
-            "metrics": {"security_score": self.calculate_score(artifact)}
-        }
-```
-
-### Learning System Integration
-
-The system learns from each execution to improve future performance:
-
-```python
-from src.learning.engine import LearningEngine
-
-engine = LearningEngine()
-
-# Record execution patterns
-await engine.record_execution(
-    task=completed_task,
-    prompt_used=prompt_template,
-    execution_time=duration,
-    success=True,
-    artifacts=produced_artifacts
-)
-
-# Get recommendations for similar tasks
-recommendations = await engine.get_recommendations(new_task)
+# pytest.ini
+[tool:pytest]
+testpaths = tests
+asyncio_mode = auto
+filterwarnings = 
+    error
+    ignore::UserWarning
+    ignore::DeprecationWarning
+addopts = 
+    --strict-markers
+    --tb=short
 ```
 
 ## API Reference
 
-### Core Classes
-
-- `Agent`: Base class for all agents
-- `Task`: Represents a unit of work
-- `Artifact`: Code artifacts produced by agents
-- `Verifier`: Base class for verification components
-- `PromptTemplate`: Templates for agent prompts
-
-### Key Methods
-
-#### ClaudeClient
-
-- `create_message()`: Send a message to Claude
-- `stream_message()`: Stream responses from Claude
-- `create_message_with_retry()`: Message with automatic retry
-
-#### MetaAgent
-
-- `decompose_task()`: Break down user requests into tasks
-- `spawn_agent()`: Create specialized sub-agents
-- `monitor_progress()`: Track system progress
-
-## Monitoring and Observability
-
-The system provides comprehensive logging and metrics:
+### MetaAgent API
 
 ```python
-from src.utils.app_logging import get_logger, LogContext
-
-logger = get_logger(__name__)
-
-# Structured logging with context
-with LogContext(task_id=task.id, agent_role=agent.role):
-    logger.info("Starting task execution")
+class MetaAgent:
+    async def process_request(
+        self,
+        request: str,
+        context: Optional[TaskContext] = None
+    ) -> TaskResult:
+        """Process a complete user request."""
+        
+    async def decompose_task(
+        self,
+        request: str
+    ) -> List[Task]:
+        """Break down request into executable tasks."""
+        
+    async def coordinate_execution(
+        self,
+        tasks: List[Task]
+    ) -> List[TaskResult]:
+        """Coordinate task execution across agents."""
 ```
+
+### Sub-Agent API
+
+```python
+class SubAgent(Agent):
+    async def execute_task(
+        self,
+        task: Task,
+        context: TaskContext
+    ) -> TaskResult:
+        """Execute a specific task."""
+        
+    async def verify_result(
+        self,
+        result: TaskResult
+    ) -> VerificationResult:
+        """Verify task execution result."""
+```
+
+### Artifact Manager API
+
+```python
+class ArtifactManager:
+    async def store_artifact(
+        self,
+        artifact: Artifact
+    ) -> str:
+        """Store an artifact and return its ID."""
+        
+    async def retrieve_artifact(
+        self,
+        artifact_id: str
+    ) -> Artifact:
+        """Retrieve an artifact by ID."""
+        
+    async def list_artifacts(
+        self,
+        project_id: Optional[str] = None
+    ) -> List[Artifact]:
+        """List artifacts, optionally filtered by project."""
+```
+
+## Development
+
+### Code Organization
+
+```
+src/
+├── agents/          # Agent implementations
+├── core/           # Core system components
+├── clients/        # API clients (Claude, OpenAI)
+├── verification/   # Verification system
+├── utils/          # Utility functions
+└── prompts/        # AI prompts and templates
+```
+
+### Development Workflow
+
+1. **Code Style**: Uses Black for formatting, Ruff for linting
+2. **Type Checking**: MyPy for static type analysis
+3. **Testing**: Pytest with async support and coverage
+4. **Documentation**: Docstrings and type hints throughout
+5. **Version Control**: Git with conventional commits
+
+### Contributing Guidelines
+
+1. **Fork the repository**
+2. **Create feature branch**: `git checkout -b feature/new-feature`
+3. **Follow code style**: Run `black` and `ruff` before committing
+4. **Add tests**: Ensure new code has test coverage
+5. **Update documentation**: Update README and docstrings
+6. **Submit pull request**: Include description of changes
+
+## Monitoring & Observability
+
+### Logging
+
+The system uses structured logging with multiple output formats:
+
+```python
+import structlog
+
+logger = structlog.get_logger(__name__)
+
+# Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
+logger.info("Task completed", task_id=task_id, duration=duration)
+```
+
+### Metrics
+
+Key metrics tracked:
+- Task completion rates
+- Agent performance
+- Verification success rates
+- API usage and costs
+- System health indicators
+
+### Health Checks
+
+```bash
+# Run comprehensive health check
+python scripts/health_check.py
+
+# Check specific components
+python scripts/health_check.py --component agents
+python scripts/health_check.py --component verification
+```
+
+## Troubleshooting
+
+### Common Issues
+
+#### 1. API Key Issues
+```bash
+# Check API key configuration
+python -c "from config import get_settings; print(get_settings().anthropic_api_key[:10])"
+
+# Test API connectivity
+python scripts/health_check.py
+```
+
+#### 2. Claude Code CLI Not Found
+```bash
+# Install Claude Code CLI
+# Follow instructions at https://docs.anthropic.com/claude/docs/claude-code
+
+# Verify installation
+claude --version
+```
+
+#### 3. Verification Failures
+```bash
+# Check verification configuration
+python -c "from config import get_settings; print(get_settings().verification_enabled)"
+
+# Run verification tests
+pytest tests/test_verification.py -v
+```
+
+#### 4. Memory Issues
+```bash
+# Check system resources
+python scripts/health_check.py --resource-check
+
+# Reduce parallel tasks
+export MAX_PARALLEL_TASKS=1
+```
+
+### Error Messages
+
+- **`CLINotAvailableError`**: Claude Code CLI not installed or not in PATH
+- **`APIKeyError`**: Invalid or missing API keys
+- **`VerificationError`**: Code failed verification checks
+- **`TaskTimeoutError`**: Task execution exceeded timeout
+- **`ArtifactCorruptionError`**: Artifact integrity check failed
+
+### Debug Mode
+
+Enable debug logging:
+```bash
+export LOG_LEVEL=DEBUG
+python your_script.py
+```
+
+## Performance Considerations
+
+### Optimization Settings
+
+```python
+# Recommended production settings
+MAX_PARALLEL_TASKS=3          # Balance between speed and resource usage
+VERIFICATION_ENABLED=true     # Always verify in production
+TEST_COVERAGE_THRESHOLD=90    # High quality threshold
+```
+
+### Resource Requirements
+
+- **Memory**: 4GB+ recommended for concurrent operations
+- **CPU**: 2+ cores for parallel processing
+- **Disk**: 1GB+ for artifact storage
+- **Network**: Stable connection for API calls
+
+## System Status
+
+### Current Implementation Status
+
+- ✅ **Core Architecture**: Fully implemented
+- ✅ **Agent System**: Complete with Meta Agent and Sub-Agents
+- ✅ **Verification System**: Comprehensive verification pipeline
+- ✅ **Artifact Management**: Full versioning and storage
+- ✅ **API Integration**: Claude and OpenAI client support
+- ✅ **Testing Infrastructure**: Extensive test coverage
+- ✅ **Documentation**: Complete API and usage documentation
+
+### Generated Projects
+
+The system has successfully generated 200+ projects including:
+- Hello World applications
+- Calculators and mathematical tools
+- Weather applications (CLI and desktop)
+- REST APIs with PostgreSQL backends
+- Todo list applications
+- Complex multi-component systems
+
+### Version Information
+
+- **Version**: 0.1.0
+- **Python**: 3.9+
+- **License**: MIT
+- **Status**: Alpha (Production Ready)
+
+## Acknowledgments
+
+Built with:
+- **Claude AI** by Anthropic for code generation
+- **OpenAI GPT** for task decomposition
+- **Python** ecosystem for implementation
+- **pytest** for testing framework
+- **Pydantic** for configuration management
+- **NetworkX** for dependency management

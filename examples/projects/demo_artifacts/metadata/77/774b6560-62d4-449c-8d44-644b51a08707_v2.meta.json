@@ -1,0 +1,25 @@
+{
+  "id": "774b6560-62d4-449c-8d44-644b51a08707",
+  "name": "calculator.py",
+  "type": "source_code",
+  "version": 2,
+  "language": "python",
+  "path": "src/calculator.py",
+  "created_at": "2025-06-30T14:13:22.752334+00:00",
+  "modified_at": "2025-06-30T14:13:22.752366+00:00",
+  "task_id": "6ea4e7f5-55c7-42da-b6f5-d298071131b4",
+  "agent_id": "4b2a69dd-836b-47c7-a42a-d1363b29e1b9",
+  "previous_version_id": "8f1a2528-5461-41d6-89d8-e53c7c201eae",
+  "checksum": "376890c19a3d51ec42a0bad761c58ccbe05c2c8ce83736d7fd943febdd3a309f",
+  "size_bytes": 492,
+  "encoding": "utf-8",
+  "dependencies": [],
+  "tags": [
+    "math",
+    "basic",
+    "calculator"
+  ],
+  "metadata": {
+    "update_reason": "Added power function"
+  }
+}

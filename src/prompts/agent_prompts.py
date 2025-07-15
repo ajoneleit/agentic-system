@@ -34,17 +34,23 @@ Generate production-ready code that:
 4. Is well-structured and maintainable
 5. Includes appropriate comments (but not excessive)
 
-Output Format:
+IMPORTANT: You are working directly in a project workspace. Write the actual code files directly.
+
+For each file you create:
+1. Use clear, descriptive filenames (e.g., fibonacci.py, calculator.py)
+2. Write the complete, working code
+3. Include all necessary imports
+4. Add appropriate docstrings and comments
+
+After writing the code, provide a brief summary in this JSON format:
 {{
-    "code": "// Your generated code here",
-    "filename": "appropriate_filename.ext",
-    "dependencies": ["list of required dependencies"],
-    "notes": "Any important notes about the implementation",
-    "complexity_score": 1-10,
-    "test_suggestions": ["Suggested test cases"]
+    "files_created": ["list of files you created"],
+    "dependencies": ["external libraries needed, if any"],
+    "notes": "Brief implementation notes",
+    "next_steps": ["Any follow-up tasks needed"]
 }}
 
-Remember: Focus on clean, efficient, and readable code.""",
+Focus on writing clean, working code directly to files.""",
     variables=["task_specification", "project_context", "language", 
                "frameworks", "style_guide", "available_artifacts"],
 )
@@ -76,21 +82,23 @@ Create a comprehensive test suite that:
 5. Uses appropriate mocking for external dependencies
 6. Follows {test_framework} best practices
 
-Output Format:
+IMPORTANT: You are working directly in a project workspace. Write the test files directly.
+
+For test files:
+1. Use standard test naming (e.g., test_fibonacci.py, test_calculator.py)
+2. Write complete, runnable tests
+3. Include all necessary imports and fixtures
+4. Add clear test docstrings
+
+After writing the tests, provide a brief summary in this JSON format:
 {{
-    "test_code": "// Your test code here",
-    "filename": "test_appropriate_name.py",
-    "test_cases": [
-        {{
-            "name": "test_function_name",
-            "description": "What this test validates",
-            "type": "unit|integration|edge_case"
-        }}
-    ],
+    "files_created": ["list of test files created"],
+    "test_count": "number of tests written",
     "coverage_estimate": 85,
-    "mocks_required": ["List of things that need mocking"],
-    "setup_requirements": "Any special setup needed"
-}}""",
+    "notes": "Brief notes about the test suite"
+}}
+
+Focus on writing comprehensive, working tests.""",
     variables=["code_to_test", "task_specification", "test_framework", 
                "coverage_target", "project_context"],
 )
@@ -142,7 +150,11 @@ Output Format:
         ]
     }},
     "diagrams_needed": ["List of diagrams that would be helpful"]
-}}""",
+}}
+
+IMPORTANT: Actually, ignore the JSON format above. You are working directly in a project workspace.
+Write documentation files directly (e.g., README.md, API.md, docs/).
+Just create the files and provide a brief summary of what documentation you created.""",
     variables=["code_to_document", "doc_type", "target_audience", 
                "project_context", "doc_style"],
 )
@@ -174,27 +186,13 @@ Refactor the code to:
 5. Optimize performance where possible
 6. Ensure all tests still pass
 
-Output Format:
-{{
-    "refactored_code": "// Your refactored code here",
-    "changes": [
-        {{
-            "type": "structural|performance|readability|bug_fix",
-            "description": "What was changed and why",
-            "impact": "Expected impact of the change",
-            "risk_level": "low|medium|high"
-        }}
-    ],
-    "metrics": {{
-        "complexity_before": 10,
-        "complexity_after": 6,
-        "lines_before": 100,
-        "lines_after": 80,
-        "performance_impact": "+20% estimated"
-    }},
-    "breaking_changes": ["List of any breaking changes"],
-    "migration_guide": "How to migrate existing code if needed"
-}}""",
+IMPORTANT: You are working directly in a project workspace.
+Write the refactored code directly to files with clear names (e.g., calculator_refactored.py).
+After refactoring, provide a brief summary of:
+- What files you created/modified
+- Key improvements made
+- Any breaking changes
+- Performance improvements if applicable""",
     variables=["code_to_refactor", "refactoring_goals", "constraints", 
                "project_context"],
 )
@@ -228,32 +226,16 @@ Analyze the issue and provide:
 4. Recommended fix with explanation
 5. Prevention strategies for similar issues
 
-Output Format:
-{{
-    "diagnosis": {{
-        "issue_type": "syntax|logic|performance|security|other",
-        "root_cause": "Detailed explanation of the root cause",
-        "affected_components": ["List of affected parts"],
-        "severity": "critical|high|medium|low"
-    }},
-    "solutions": [
-        {{
-            "approach": "Solution approach name",
-            "description": "Detailed solution description",
-            "code_fix": "// Fixed code here",
-            "confidence": 0.95,
-            "side_effects": ["Potential side effects"],
-            "estimated_effort": "low|medium|high"
-        }}
-    ],
-    "recommended_solution": 0,
-    "prevention": {{
-        "best_practices": ["Best practices to prevent this"],
-        "testing_strategy": "How to test for this issue",
-        "code_review_points": ["What to look for in reviews"]
-    }},
-    "related_issues": ["Similar issues to check for"]
-}}""",
+IMPORTANT: You are working directly in a project workspace.
+Fix the issues directly in the code files.
+Create fixed versions with clear names (e.g., calculator_fixed.py).
+Write any debugging utilities or test files as needed.
+
+After fixing, provide a brief summary including:
+- Root cause of the issue
+- How you fixed it
+- Files created/modified
+- Any additional debugging tools added""",
     variables=["problematic_code", "error_info", "expected_behavior", 
                "actual_behavior", "project_context"],
 )

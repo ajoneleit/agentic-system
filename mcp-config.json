@@ -1,0 +1,70 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "mcp-server-filesystem",
+      "args": ["--workspace", "./workspace"],
+      "capabilities": ["read", "write", "edit", "list"],
+      "description": "File system operations for code generation and modification"
+    },
+    "bash": {
+      "command": "mcp-server-bash",
+      "args": ["--safe-mode", "--working-dir", "./workspace"],
+      "capabilities": ["execute"],
+      "description": "Execute commands for testing and verification",
+      "restrictions": {
+        "allowedCommands": ["python", "pytest", "npm", "node", "jest", "mocha", "go", "cargo", "javac", "java"],
+        "maxExecutionTime": 300,
+        "maxOutputSize": 10485760
+      }
+    },
+    "git": {
+      "command": "mcp-server-git",
+      "args": ["--repo", "./"],
+      "capabilities": ["status", "diff", "commit", "log"],
+      "description": "Version control operations"
+    },
+    "search": {
+      "command": "mcp-server-search",
+      "args": ["--root", "./"],
+      "capabilities": ["grep", "find"],
+      "description": "Code search and analysis"
+    }
+  },
+  "security": {
+    "maxMemoryMB": 2048,
+    "maxCpuPercent": 80,
+    "timeout": 600,
+    "allowedPaths": ["./workspace", "./artifacts", "./tests", "./src"],
+    "deniedPaths": ["/etc", "/usr", "/bin", "/sbin", "/home"],
+    "envVarWhitelist": ["PATH", "PYTHONPATH", "NODE_PATH", "JAVA_HOME"],
+    "networkAccess": false
+  },
+  "logging": {
+    "level": "info",
+    "logFile": "./logs/mcp-operations.log",
+    "logToolUsage": true,
+    "logPerformance": true
+  },
+  "agentPermissions": {
+    "core_logic": {
+      "allowedTools": ["filesystem:write", "filesystem:read", "filesystem:edit", "search:grep"],
+      "workspacePath": "./workspace/src"
+    },
+    "testing": {
+      "allowedTools": ["filesystem:write", "filesystem:read", "bash:execute", "search:grep"],
+      "workspacePath": "./workspace/tests"
+    },
+    "documentation": {
+      "allowedTools": ["filesystem:write", "filesystem:read", "filesystem:edit"],
+      "workspacePath": "./workspace/docs"
+    },
+    "optimization": {
+      "allowedTools": ["filesystem:read", "filesystem:edit", "search:grep", "bash:execute"],
+      "workspacePath": "./workspace/src"
+    },
+    "verification": {
+      "allowedTools": ["filesystem:read", "bash:execute", "search:grep"],
+      "workspacePath": "./workspace"
+    }
+  }
+}

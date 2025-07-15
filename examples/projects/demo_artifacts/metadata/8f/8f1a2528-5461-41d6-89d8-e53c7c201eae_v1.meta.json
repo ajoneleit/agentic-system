@@ -1,0 +1,23 @@
+{
+  "id": "8f1a2528-5461-41d6-89d8-e53c7c201eae",
+  "name": "calculator.py",
+  "type": "source_code",
+  "version": 1,
+  "language": "python",
+  "path": "src/calculator.py",
+  "created_at": "2025-06-30T14:13:22.723002",
+  "modified_at": "2025-06-30T14:13:22.723040",
+  "task_id": "6ea4e7f5-55c7-42da-b6f5-d298071131b4",
+  "agent_id": "4b2a69dd-836b-47c7-a42a-d1363b29e1b9",
+  "previous_version_id": null,
+  "checksum": "075a4fc14fa0b9ba5bb2011e1d3edd5ba50d8f5335c1167689712760587581a7",
+  "size_bytes": 396,
+  "encoding": "utf-8",
+  "dependencies": [],
+  "tags": [
+    "math",
+    "basic",
+    "calculator"
+  ],
+  "metadata": {}
+}

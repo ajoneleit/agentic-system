@@ -1,7 +1,8 @@
-"""Claude API client with async support and advanced features.
+"""Enhanced Claude client with unified API/CLI support.
 
-This module provides a robust, production-ready client for interacting with
-the Anthropic Claude API, including rate limiting, retry logic, and monitoring.
+This module provides a production-ready client that seamlessly switches between
+Claude API and CLI modes based on agent type and configuration. Meta Agent always
+uses the API with Opus 3, while sub-agents can leverage CLI with MCP tools.
 """
 
 import asyncio
@@ -122,7 +123,12 @@ class TokenCounter:
 
 
 class ClaudeClient:
-    """Production-ready Claude API client with advanced features."""
+    """Enhanced Claude client supporting both API and CLI modes.
+    
+    This client provides a unified interface that can use either the Claude API
+    or Claude CLI depending on configuration and agent type. Meta Agent always
+    uses the API with Opus 3, while sub-agents can use CLI for enhanced capabilities.
+    """
     
     def __init__(
         self,
@@ -130,18 +136,26 @@ class ClaudeClient:
         base_url: Optional[str] = None,
         timeout: Optional[int] = None,
         max_retries: Optional[int] = None,
+        use_cli_for_subagents: bool = False,
     ):
-        """Initialize Claude client.
+        """Initialize Claude client with API/CLI support.
         
         Args:
             api_key: Anthropic API key (defaults to settings)
             base_url: API base URL (defaults to settings)
             timeout: Request timeout in seconds (defaults to settings)
             max_retries: Maximum retry attempts (defaults to settings)
+            use_cli_for_subagents: Enable CLI for sub-agents (default False)
         """
         settings = get_settings()
         
-        # Use provided values or fall back to settings
+        # Store configuration - use settings if not explicitly provided
+        self.use_cli_for_subagents = (
+            use_cli_for_subagents if use_cli_for_subagents is not None 
+            else settings.cli.use_cli_for_subagents
+        )
+        
+        # Initialize API backend (always needed for Meta Agent)
         self.api_key = api_key or settings.api.key.get_secret_value()
         if not self.api_key:
             raise APIKeyError()
@@ -172,12 +186,60 @@ class ClaudeClient:
             ClaudeModel.HAIKU: 200000,
         }
         
+        # Initialize CLI backend if enabled
+        self._cli_backend = None
+        if self.use_cli_for_subagents:
+            try:
+                from src.clients.claude_cli_client_robust import ClaudeCodeClient
+                self._cli_backend = ClaudeCodeClient()
+                logger.info("Claude CLI backend initialized for sub-agents")
+            except Exception as e:
+                logger.warning(f"Failed to initialize CLI backend: {e}")
+                self.use_cli_for_subagents = False
+        
         logger.info(
             "Claude client initialized",
             base_url=self.base_url,
             timeout=self.timeout,
             max_retries=self.max_retries,
+            cli_enabled=self.use_cli_for_subagents,
         )
+    
+    def _is_meta_agent(self, **kwargs) -> bool:
+        """Check if the caller is a Meta Agent.
+        
+        Args:
+            **kwargs: Context parameters
+            
+        Returns:
+            True if Meta Agent
+        """
+        agent_role = kwargs.get("agent_role", "").lower()
+        return agent_role in ["meta_agent", "meta-agent", "orchestrator"]
+    
+    def _should_use_cli(self, **kwargs) -> bool:
+        """Determine if CLI should be used.
+        
+        Args:
+            **kwargs: Context parameters
+            
+        Returns:
+            True if CLI should be used
+        """
+        # Never use CLI for Meta Agent
+        if self._is_meta_agent(**kwargs):
+            return False
+            
+        # Check if CLI is enabled and available
+        if not self.use_cli_for_subagents or not self._cli_backend:
+            return False
+            
+        # Check for explicit override
+        if "force_api" in kwargs:
+            return not kwargs["force_api"]
+            
+        # Use CLI for sub-agents
+        return True
     
     @retry(
         retry=retry_if_exception_type((APITimeoutError, APIResponseError)),
@@ -193,24 +255,62 @@ class ClaudeClient:
         system: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
-    ) -> Message:
-        """Create a message using Claude API.
+    ) -> Union[Message, Dict[str, Any]]:
+        """Create a message using Claude API or CLI.
+        
+        This method automatically selects between API and CLI based on context.
+        Meta Agent always uses API with Opus 3, while sub-agents may use CLI.
         
         Args:
-            model: Model to use
+            model: Model to use (Opus 3 forced for Meta Agent)
             messages: List of message dictionaries
             max_tokens: Maximum tokens in response
             temperature: Sampling temperature
             system: System prompt
             metadata: Additional metadata for logging
-            **kwargs: Additional parameters for the API
+            **kwargs: Additional parameters including:
+                - agent_role: Role of the agent (determines API vs CLI)
+                - agent_name: Name of the agent (for CLI context)
+                - task: Task information (for CLI context)
+                - force_api: Force API usage even for sub-agents
             
         Returns:
-            Claude API response message
+            Claude API response message or CLI response dict
             
         Raises:
             APIError: Various API-related errors
         """
+        # Force Opus 3 for Meta Agent
+        if self._is_meta_agent(**kwargs):
+            model = ClaudeModel.OPUS
+            logger.info("Using Opus 3 model for Meta Agent via API")
+        
+        # Determine which backend to use
+        if self._should_use_cli(**kwargs):
+            logger.info(
+                "Using Claude CLI backend",
+                agent_role=kwargs.get("agent_role"),
+                agent_name=kwargs.get("agent_name"),
+                model=str(model),
+            )
+            
+            # Use CLI backend
+            return await self._cli_backend.create_message(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                system=system,
+                **kwargs
+            )
+        
+        # Use API backend
+        logger.info(
+            "Using Claude API backend",
+            agent_role=kwargs.get("agent_role"),
+            model=str(model),
+        )
+        
         # Validate model
         if isinstance(model, str):
             model = ClaudeModel(model)
@@ -238,7 +338,7 @@ class ClaudeClient:
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
-            **kwargs,
+            **{k: v for k, v in kwargs.items() if k not in ["agent_role", "agent_name", "task", "force_api"]},
         }
         
         if system:
@@ -320,6 +420,8 @@ class ClaudeClient:
     ) -> AsyncGenerator[MessageStreamEvent, None]:
         """Stream a message response from Claude API.
         
+        Note: Streaming is only available in API mode. CLI mode will fall back to regular message creation.
+        
         Args:
             model: Model to use
             messages: List of message dictionaries
@@ -335,6 +437,26 @@ class ClaudeClient:
         Raises:
             APIError: Various API-related errors
         """
+        # CLI doesn't support streaming, use regular message
+        if self._should_use_cli(**kwargs):
+            logger.info("CLI mode doesn't support streaming, using regular message")
+            response = await self.create_message(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                system=system,
+                metadata=metadata,
+                **kwargs
+            )
+            # Yield a single event with the full response
+            yield response
+            return
+        
+        # Force Opus 3 for Meta Agent
+        if self._is_meta_agent(**kwargs):
+            model = ClaudeModel.OPUS
+        
         # Validate model
         if isinstance(model, str):
             model = ClaudeModel(model)
@@ -406,7 +528,7 @@ class ClaudeClient:
         max_retries: Optional[int] = None,
         fallback_model: Optional[ClaudeModel] = None,
         **kwargs: Any,
-    ) -> Message:
+    ) -> Union[Message, Dict[str, Any]]:
         """Create message with automatic retry and fallback.
         
         Args:
@@ -417,7 +539,7 @@ class ClaudeClient:
             **kwargs: Additional parameters for create_message
             
         Returns:
-            Claude API response message
+            Claude API response message or CLI response
         """
         max_retries = max_retries or self.max_retries
         
@@ -464,7 +586,7 @@ class ClaudeClient:
         Returns:
             Dictionary of metrics
         """
-        return {
+        metrics = {
             "total_requests": self.total_requests,
             "total_tokens_used": self.total_tokens_used,
             "average_tokens_per_request": (
@@ -473,12 +595,47 @@ class ClaudeClient:
                 else 0
             ),
             "rate_limit_tokens_available": self.rate_limiter.tokens,
+            "cli_enabled": self.use_cli_for_subagents,
         }
+        
+        # Add CLI metrics if available
+        if self._cli_backend:
+            metrics["cli_available"] = True
+        else:
+            metrics["cli_available"] = False
+            
+        return metrics
+    
+    async def check_availability(self) -> Dict[str, bool]:
+        """Check availability of API and CLI backends.
+        
+        Returns:
+            Dictionary with availability status
+        """
+        availability = {
+            "api": bool(self.api_key),
+            "cli": False,
+            "cli_enabled": self.use_cli_for_subagents,
+        }
+        
+        # Check CLI availability
+        if self._cli_backend:
+            try:
+                availability["cli"] = await self._cli_backend.check_cli_available()
+            except Exception as e:
+                logger.warning(f"Failed to check CLI availability: {e}")
+                availability["cli"] = False
+        
+        return availability
     
     async def close(self) -> None:
         """Close the client and clean up resources."""
         await self.client.close()
-        logger.info("Claude client closed")
+        logger.info("Claude API client closed")
+        
+        if self._cli_backend:
+            await self._cli_backend.close()
+            logger.info("Claude CLI backend closed")
     
     async def __aenter__(self) -> "ClaudeClient":
         """Async context manager entry."""

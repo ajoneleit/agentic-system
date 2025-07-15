@@ -87,8 +87,14 @@ class TaskQueue:
                     for item in temp_heap:
                         heapq.heappush(self._heap, item)
                     
+                    logger.debug(f"Task '{task.name}' is ready to execute (all {len(task.dependencies)} dependencies satisfied)")
                     return task
                 else:
+                    # Log why task is not ready
+                    unsatisfied_deps = [str(d) for d in task.dependencies if d not in completed_tasks]
+                    logger.debug(
+                        f"Task '{task.name}' not ready - waiting for {len(unsatisfied_deps)} dependencies: {unsatisfied_deps[:3]}"
+                    )
                     temp_heap.append((priority, created_at, task))
             
             # Put back all tasks
@@ -379,6 +385,15 @@ class TaskManager:
         for _ in range(max_count):
             task = await self._queue.get_next_ready_task(self._completed_tasks)
             if task:
+                # Double-check dependencies are satisfied
+                if not task.is_ready(self._completed_tasks):
+                    logger.error(
+                        f"CRITICAL: Task '{task.name}' returned as ready but dependencies not satisfied! "
+                        f"Dependencies: {[str(d) for d in task.dependencies]}, "
+                        f"Completed: {[str(c) for c in self._completed_tasks]}"
+                    )
+                    continue
+                
                 ready_tasks.append(task)
                 async with self._lock:
                     self._active_tasks[task.id] = task
@@ -638,3 +653,50 @@ class TaskManager:
             })
         
         return plan
+    
+    async def reset_task(self, task_id: UUID) -> bool:
+        """Reset a failed task for retry.
+        
+        Args:
+            task_id: Task ID to reset
+            
+        Returns:
+            True if reset successfully
+        """
+        task = await self._queue.get_task(task_id)
+        if not task:
+            return False
+        
+        if task.status in [TaskStatus.FAILED, TaskStatus.CANCELLED]:
+            task.status = TaskStatus.PENDING
+            task.error_message = None
+            await self._queue.update_task(task)
+            
+            logger.info(
+                "Task reset for retry",
+                task_id=str(task_id),
+                task_name=task.name,
+            )
+            return True
+        
+        return False
+    
+    async def mark_task_failed(self, task_id: UUID, error: str) -> None:
+        """Mark a task as failed with error message.
+        
+        Args:
+            task_id: Task ID
+            error: Error message
+        """
+        task = await self._queue.get_task(task_id)
+        if task:
+            task.status = TaskStatus.FAILED
+            task.error_message = error
+            await self._queue.update_task(task)
+            
+            logger.info(
+                "Task marked as failed",
+                task_id=str(task_id),
+                task_name=task.name,
+                error=error
+            )

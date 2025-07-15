@@ -1,0 +1,161 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "mcp-server-filesystem",
+      "args": ["--workspace", "./workspace"],
+      "capabilities": ["read", "write", "edit", "list"],
+      "description": "File system operations for code generation and modification"
+    },
+    "bash": {
+      "command": "mcp-server-bash",
+      "args": ["--safe-mode", "--working-dir", "./workspace"],
+      "capabilities": ["execute"],
+      "description": "Execute commands for testing and verification",
+      "restrictions": {
+        "allowedCommands": ["python", "pytest", "npm", "node", "jest", "mocha", "go", "cargo", "javac", "java", "rustc"],
+        "maxExecutionTime": 300,
+        "maxOutputSize": 10485760
+      }
+    },
+    "git": {
+      "command": "mcp-server-git",
+      "args": ["--repo", "./"],
+      "capabilities": ["status", "diff", "commit", "log"],
+      "description": "Version control operations"
+    },
+    "search": {
+      "command": "mcp-server-search",
+      "args": ["--root", "./"],
+      "capabilities": ["grep", "find"],
+      "description": "Code search and analysis"
+    },
+    "sequentialthinking": {
+      "command": "mcp-server-sequentialthinking",
+      "args": ["--mode", "deep-reasoning", "--steps", "10"],
+      "capabilities": ["step-by-step", "chain-of-thought", "verification", "proof-validation"],
+      "description": "Sequential reasoning and logical deduction for complex problems",
+      "config": {
+        "maxSteps": 10,
+        "backtracking": true,
+        "parallelBranches": 3
+      }
+    },
+    "taskmanager": {
+      "command": "mcp-server-taskmanager",
+      "args": ["--parallel", "--mece", "--adaptive"],
+      "capabilities": ["decomposition", "scheduling", "dependency-resolution", "resource-allocation"],
+      "description": "MECE task decomposition and intelligent scheduling",
+      "config": {
+        "decompositionStrategy": "hierarchical",
+        "schedulingAlgorithm": "priority-weighted",
+        "maxParallelTasks": 10,
+        "contextCompression": true
+      }
+    },
+    "context7": {
+      "command": "mcp-server-context7",
+      "args": ["--compression", "intelligent", "--memory", "persistent"],
+      "capabilities": ["summarization", "relevance-filtering", "context-switching", "memory-management"],
+      "description": "Advanced context management with intelligent compression",
+      "config": {
+        "compressionRatio": 0.1,
+        "relevanceThreshold": 0.8,
+        "memoryRetention": "adaptive",
+        "contextWindows": 5
+      }
+    },
+    "openrouterai": {
+      "command": "mcp-server-openrouter",
+      "args": ["--models", "online", "--fallback", "true"],
+      "capabilities": ["web-search", "real-time-data", "multi-model", "research"],
+      "description": "Multi-model AI routing with online capabilities",
+      "config": {
+        "models": ["claude-3-opus:online", "gpt-4:online", "gemini-pro:online"],
+        "fallbackOrder": ["claude-3-opus", "gpt-4", "gemini-pro"],
+        "parallelRequests": true,
+        "caching": true
+      }
+    }
+  },
+  "interactionNet": {
+    "engine": "rust",
+    "rewriteRules": "./rules/interaction-rules.json",
+    "parallelReduction": true,
+    "geometricEvolution": {
+      "enabled": true,
+      "fitnessMetrics": ["reduction-steps", "memory-usage", "parallelism"],
+      "mutationRate": 0.1,
+      "populationSize": 50
+    }
+  },
+  "security": {
+    "maxMemoryMB": 4096,
+    "maxCpuPercent": 90,
+    "timeout": 1200,
+    "allowedPaths": ["./workspace", "./artifacts", "./tests", "./src", "./zero-engine"],
+    "deniedPaths": ["/etc", "/usr", "/bin", "/sbin", "/home"],
+    "envVarWhitelist": ["PATH", "PYTHONPATH", "NODE_PATH", "JAVA_HOME", "CARGO_HOME", "RUSTUP_HOME"],
+    "networkAccess": true
+  },
+  "logging": {
+    "level": "info",
+    "logFile": "./logs/zero-operations.log",
+    "logToolUsage": true,
+    "logPerformance": true,
+    "logEvolution": true
+  },
+  "agentPermissions": {
+    "meta_agent": {
+      "allowedTools": ["*"],
+      "workspacePath": "./",
+      "privileges": ["orchestration", "evolution", "learning"]
+    },
+    "evolution_agent": {
+      "allowedTools": ["filesystem:*", "bash:execute", "sequentialthinking:*", "openrouterai:*"],
+      "workspacePath": "./zero-engine",
+      "privileges": ["mutation", "fitness-evaluation", "rule-generation"]
+    },
+    "mece_agent": {
+      "allowedTools": ["taskmanager:*", "context7:*", "sequentialthinking:*"],
+      "workspacePath": "./workspace",
+      "privileges": ["decomposition", "compression", "scheduling"]
+    },
+    "interaction_agent": {
+      "allowedTools": ["filesystem:*", "bash:execute", "search:*"],
+      "workspacePath": "./zero-engine/interaction-net",
+      "privileges": ["graph-rewriting", "reduction", "visualization"]
+    }
+  },
+  "slashCommands": {
+    "/evolve": {
+      "description": "Trigger evolutionary optimization",
+      "handler": "evolution_agent",
+      "args": ["iterations", "fitness-target"]
+    },
+    "/visualize": {
+      "description": "Render interaction net state",
+      "handler": "interaction_agent",
+      "args": ["format", "detail-level"]
+    },
+    "/compress": {
+      "description": "Show MECE decomposition with context compression",
+      "handler": "mece_agent",
+      "args": ["task", "compression-level"]
+    },
+    "/parallel": {
+      "description": "Execute tasks in parallel with separate contexts",
+      "handler": "taskmanager",
+      "args": ["tasks", "max-parallel"]
+    },
+    "/learn": {
+      "description": "Display learned patterns and strategies",
+      "handler": "evolution_agent",
+      "args": ["pattern-type", "limit"]
+    },
+    "/simulate": {
+      "description": "Run what-if scenarios on interaction nets",
+      "handler": "interaction_agent",
+      "args": ["scenario", "iterations"]
+    }
+  }
+}

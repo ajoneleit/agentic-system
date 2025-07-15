@@ -43,7 +43,7 @@ class TestErrorHandling:
         )
         
         with patch('src.agents.sub_agent.ClaudeClient'), \
-             patch('src.agents.sub_agent.ClaudeCLIClient') as mock_cli:
+             patch('src.agents.sub_agent.ClaudeCodeClient') as mock_cli:
             # Mock CLI as not available to force API usage
             mock_cli_instance = mock_cli.return_value
             mock_cli_instance.check_cli_available = AsyncMock(return_value=False)
@@ -51,9 +51,9 @@ class TestErrorHandling:
             
             await agent.initialize(context)
             
-            # Mock Claude to return invalid response
-            agent.claude_client.create_message = AsyncMock(
-                return_value=MagicMock(content=[MagicMock(text="Not JSON")])
+            # Mock Claude Code client to simulate a failure
+            agent.claude_code_client.create_message_for_code = AsyncMock(
+                side_effect=Exception("Simulated CLI failure")
             )
             
             # Execute task - should return failed result
@@ -61,7 +61,7 @@ class TestErrorHandling:
             
             assert not result.success
             assert len(result.errors) > 0
-            assert "Failed to parse Claude response as JSON" in result.errors[0]
+            assert "Claude Code query failed" in result.errors[0]
             assert task.id not in agent.completed_tasks  # Failed tasks are not added to completed_tasks
     
     
@@ -73,21 +73,19 @@ class TestErrorHandling:
             shared_memory={}
         )
         
-        with patch('src.agents.sub_agent.ClaudeClient') as mock_claude, \
-             patch('src.agents.sub_agent.ClaudeCLIClient') as mock_cli:
-            # Mock CLI as not available
+        with patch('src.agents.sub_agent.ClaudeCodeClient') as mock_cli:
+            # Mock CLI as not available to simulate initialization failure
             mock_cli_instance = mock_cli.return_value
             mock_cli_instance.check_cli_available = AsyncMock(return_value=False)
             mock_cli_instance.close = AsyncMock()
             
-            # Make ClaudeClient construction fail
-            mock_claude.side_effect = ConnectionError("Cannot connect to API")
-            
             agent = CodeGeneratorAgent(uuid4())
             
-            # The error happens during initialize when ClaudeClient is created
-            with pytest.raises(ConnectionError):
-                await agent.initialize(context)
+            # The initialization should fail when CLI is not available
+            result = await agent.initialize(context)
+            
+            assert not result.is_success()
+            assert "Claude Code is required" in str(result.get_error())
     
     
     @pytest.mark.asyncio
@@ -107,7 +105,7 @@ class TestErrorHandling:
         )
         
         with patch('src.agents.sub_agent.ClaudeClient'), \
-             patch('src.agents.sub_agent.ClaudeCLIClient') as mock_cli:
+             patch('src.agents.sub_agent.ClaudeCodeClient') as mock_cli:
             # Mock CLI as not available to force API usage
             mock_cli_instance = mock_cli.return_value
             mock_cli_instance.check_cli_available = AsyncMock(return_value=False)

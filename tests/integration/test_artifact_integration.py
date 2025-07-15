@@ -88,35 +88,45 @@ async def test_sub_agent_creates_artifacts_with_artifact_manager(artifact_manage
         enable_artifact_caching=True,
     )
     
-    # Mock Claude response
+    # Mock Claude response and CLI availability
     with patch.object(agent, "_query_claude") as mock_query:
-        mock_query.return_value = """{
-            "code": "def add(a, b):\\n    return a + b\\n\\ndef subtract(a, b):\\n    return a - b",
-            "filename": "calculator.py",
-            "dependencies": [],
-            "complexity_score": 2,
-            "notes": "Simple calculator implementation"
-        }"""
+        from src.core.result import Result
+        # Mock Claude response to indicate success (not JSON)
+        mock_query.return_value = Result.success("Successfully created calculator.py with add and subtract functions.")
         
-        # Initialize agent
-        await agent.initialize(context)
-        
-        # Execute task
-        result = await agent.execute_task(task, context)
-        
-        # Verify result
-        assert isinstance(result, TaskResult)
-        assert result.success
-        assert len(result.artifacts) == 1
-        assert result.primary_artifact is not None
-        
-        # Verify artifact was stored
-        stored_artifact = await artifact_manager.get_artifact(result.primary_artifact)
-        assert stored_artifact is not None
-        assert stored_artifact.type == ArtifactType.SOURCE_CODE
-        assert "def add(a, b):" in stored_artifact.content
-        assert stored_artifact.metadata["project_id"] == "test_project_123"
-        assert stored_artifact.metadata["agent_role"] == AgentRole.CORE_LOGIC.value
+        # Mock ClaudeCodeClient to return True for check_cli_available
+        with patch("src.agents.sub_agent.ClaudeCodeClient") as mock_cli_class:
+            mock_cli_instance = AsyncMock()
+            mock_cli_instance.check_cli_available = AsyncMock(return_value=True)
+            mock_cli_class.return_value = mock_cli_instance
+            
+            # Initialize agent
+            await agent.initialize(context)
+            
+            # Create the expected file that Claude would have created
+            workspace_dir = context.project_root / "workspace"
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            calculator_file = workspace_dir / "calculator.py"
+            calculator_file.write_text("def add(a, b):\n    return a + b\n\ndef subtract(a, b):\n    return a - b\n")
+            
+            # Execute task
+            result = await agent.execute_task(task, context)
+            
+            # Verify result
+            assert result.is_success()
+            task_result = result.unwrap()
+            assert isinstance(task_result, TaskResult)
+            assert task_result.success
+            assert len(task_result.artifacts) == 1
+            assert task_result.primary_artifact is not None
+            
+            # Verify artifact was stored
+            stored_artifact = await artifact_manager.get_artifact(task_result.primary_artifact)
+            assert stored_artifact is not None
+            assert stored_artifact.type == ArtifactType.SOURCE_CODE
+            assert "def add(a, b):" in stored_artifact.content
+            assert stored_artifact.metadata["project_id"] == "test_project_123"
+            assert stored_artifact.metadata["agent_role"] == AgentRole.CORE_LOGIC.value
 
 
 @pytest.mark.asyncio
@@ -174,50 +184,85 @@ async def test_test_writer_links_artifacts(artifact_manager, tmp_path):
     tracker.add_dependency = AsyncMock()
     artifact_manager._dependency_tracker = tracker
     
-    # Mock Claude response
+    # Mock the CLI to have created test files
+    test_file = context.project_root / "workspace" / "test_calculator.py"
+    test_file.parent.mkdir(parents=True, exist_ok=True)
+    test_file.write_text("def test_add():\\n    assert add(2, 3) == 5")
+    
+    # Mock Claude response (just a summary)
     with patch.object(agent, "_query_claude") as mock_query:
-        mock_query.return_value = """{
-            "test_code": "def test_add():\\n    assert add(2, 3) == 5",
-            "filename": "test_calculator.py",
-            "test_cases": ["test_add"],
-            "coverage_estimate": 90,
-            "mocks_required": []
-        }"""
+        from src.core.result import Result
+        mock_query.return_value = Result.success("Created test_calculator.py with test cases for the add function.")
         
-        # Initialize agent
-        await agent.initialize(context)
-        
-        # Execute task
-        result = await agent.execute_task(task, context)
-        
-        # Verify result
-        assert result.success
-        assert len(result.artifacts) == 1
-        
-        # Verify artifact was stored
-        test_artifact = await artifact_manager.get_artifact(result.primary_artifact)
-        assert test_artifact is not None
-        assert test_artifact.type == ArtifactType.TEST_CODE
-        assert "def test_add():" in test_artifact.content
-        assert test_artifact.metadata["tested_artifact_id"] == str(stored_code.id)
-        
-        # Verify dependency was tracked
-        artifact_manager._dependency_tracker.add_dependency.assert_called_once()
+        # Mock ClaudeCodeClient to return True for check_cli_available
+        with patch("src.agents.sub_agent.ClaudeCodeClient") as mock_cli_class:
+            mock_cli_instance = AsyncMock()
+            mock_cli_instance.check_cli_available = AsyncMock(return_value=True)
+            mock_cli_class.return_value = mock_cli_instance
+            
+            # Initialize agent
+            await agent.initialize(context)
+            
+            # Execute task
+            result = await agent.execute_task(task, context)
+            
+            # Verify result
+            assert result.is_success()
+            task_result = result.unwrap()
+            assert task_result.success
+            assert len(task_result.artifacts) == 1
+            
+            # Verify artifact was stored
+            test_artifact = await artifact_manager.get_artifact(task_result.primary_artifact)
+            assert test_artifact is not None
+            assert test_artifact.type == ArtifactType.TEST_CODE
+            assert "def test_add():" in test_artifact.content
+            assert test_artifact.metadata["tested_artifact_id"] == str(stored_code.id)
+            
+            # Verify dependency was tracked
+            artifact_manager._dependency_tracker.add_dependency.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_meta_agent_project_storage_integration(meta_agent, tmp_path):
     """Test that meta agent properly initializes project storage and passes artifact manager."""
-    # Mock Claude responses
-    with patch.object(meta_agent.claude_client, "create_message") as mock_create:
-        # Mock task decomposition response
-        mock_create.return_value = AsyncMock(
-            content=[
-                MagicMock(
-                    text='{"project_summary": "Calculator app", "tasks": [{"name": "Create Calculator", "description": "Build calculator", "complexity": "simple", "agent_type": "core_logic", "deliverable": "calculator.py", "dependencies": []}]}'
+    # Mock responses based on whether using OpenAI or Claude
+    if meta_agent.using_openai:
+        mock_create = patch.object(meta_agent.ai_client, "create_message")
+    else:
+        mock_create = patch.object(meta_agent.claude_client, "create_message")
+    
+    with mock_create as mock:
+        # Setup responses for different calls
+        if meta_agent.using_openai:
+            responses = [
+                # First call: generate project name
+                {
+                    "content": "project_test"
+                },
+                # Second call: task decomposition
+                {
+                    "content": '{"project_summary": "Calculator app", "tasks": [{"name": "Create Calculator", "description": "Build calculator", "complexity": "simple", "agent_type": "core_logic", "deliverable": "calculator.py", "dependencies": []}]}'
+                }
+            ]
+        else:
+            responses = [
+                # First call: generate project name
+                AsyncMock(
+                    content=[
+                        MagicMock(text='project_test')
+                    ]
+                ),
+                # Second call: task decomposition
+                AsyncMock(
+                    content=[
+                        MagicMock(
+                            text='{"project_summary": "Calculator app", "tasks": [{"name": "Create Calculator", "description": "Build calculator", "complexity": "simple", "agent_type": "core_logic", "deliverable": "calculator.py", "dependencies": []}]}'
+                        )
+                    ]
                 )
             ]
-        )
+        mock.side_effect = responses
         
         # Mock coordinator to track context passed to agents
         captured_contexts = []
@@ -244,10 +289,11 @@ async def test_meta_agent_project_storage_integration(meta_agent, tmp_path):
         
         # Verify project storage was initialized
         assert meta_agent._current_project_id is not None
-        assert meta_agent._current_project_id.startswith("project_")
+        # Project ID should be descriptive, not just "project_"
+        assert len(meta_agent._current_project_id) > 0
         
         # Verify project directory was created
-        project_path = tmp_path / "artifacts" / meta_agent._current_project_id
+        project_path = tmp_path / "projects" / meta_agent._current_project_id
         assert project_path.exists()
         assert (project_path / "project_metadata.json").exists()
         
@@ -334,26 +380,32 @@ async def test_artifact_update_creates_new_version(artifact_manager, tmp_path):
         auto_version_on_change=True,
     )
     
-    # Initialize agent
-    await agent.initialize(context)
-    
-    # Update artifact
-    updated = await agent._update_artifact(
-        stored.id,
-        "def add(a, b):\n    return a + b\n\ndef multiply(a, b):\n    return a * b",
-        "Added multiply function",
-        context
-    )
-    
-    # Verify update
-    assert updated is not None
-    assert updated.version == 2
-    assert updated.previous_version_id == stored.id
-    assert "def multiply(a, b):" in updated.content
-    
-    # Verify both versions exist
-    v1 = await artifact_manager.get_artifact(stored.id, version=1)
-    v2 = await artifact_manager.get_artifact(updated.id, version=2)
-    assert v1 is not None
-    assert v2 is not None
-    assert v1.content != v2.content
+    # Mock ClaudeCodeClient to return True for check_cli_available
+    with patch("src.agents.sub_agent.ClaudeCodeClient") as mock_cli_class:
+        mock_cli_instance = AsyncMock()
+        mock_cli_instance.check_cli_available = AsyncMock(return_value=True)
+        mock_cli_class.return_value = mock_cli_instance
+        
+        # Initialize agent
+        await agent.initialize(context)
+        
+        # Update artifact
+        updated = await agent._update_artifact(
+            stored.id,
+            "def add(a, b):\n    return a + b\n\ndef multiply(a, b):\n    return a * b",
+            "Added multiply function",
+            context
+        )
+        
+        # Verify update
+        assert updated is not None
+        assert updated.version == 2
+        assert updated.previous_version_id == stored.id
+        assert "def multiply(a, b):" in updated.content
+        
+        # Verify both versions exist
+        v1 = await artifact_manager.get_artifact(stored.id, version=1)
+        v2 = await artifact_manager.get_artifact(updated.id, version=2)
+        assert v1 is not None
+        assert v2 is not None
+        assert v1.content != v2.content

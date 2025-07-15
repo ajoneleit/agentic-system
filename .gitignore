@@ -159,6 +159,11 @@ logs/
 .env.local
 .env.*.local
 
+# Projects directory - ignore all subdirectories except artifacts and index.json
+projects/*/
+!projects/artifacts/
+!projects/index.json
+
 # Temporary files
 *.tmp
 *.temp
