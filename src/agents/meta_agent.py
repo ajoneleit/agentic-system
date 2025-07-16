@@ -1564,7 +1564,21 @@ Suggest specific repair tasks that could fix this issue. Output as JSON:
             # Collect all artifact IDs from task results
             all_artifact_ids = []
             for result in task_results.values():
-                all_artifact_ids.extend(result.artifacts)
+                # Handle both TaskResult and Result objects safely
+                if hasattr(result, 'artifacts'):
+                    all_artifact_ids.extend(result.artifacts)
+                elif hasattr(result, 'is_success') and result.is_success():
+                    # Handle Result[TaskResult] case
+                    task_result = result.unwrap()
+                    if hasattr(task_result, 'artifacts'):
+                        all_artifact_ids.extend(task_result.artifacts)
+                else:
+                    logger.warning(
+                        "Result object has no artifacts attribute",
+                        result_type=type(result).__name__,
+                        result_has_artifacts=hasattr(result, 'artifacts'),
+                        result_has_is_success=hasattr(result, 'is_success')
+                    )
             
             # Fetch actual artifacts from storage
             all_artifacts = []
@@ -1630,9 +1644,9 @@ Suggest specific repair tasks that could fix this issue. Output as JSON:
                     "warnings": all_warnings,
                     "task_results": {
                         str(task_id): {
-                            "success": result.success,
-                            "artifacts": len(result.artifacts),
-                            "execution_time": result.execution_time,
+                            "success": result.success if hasattr(result, 'success') else False,
+                            "artifacts": len(result.artifacts) if hasattr(result, 'artifacts') else 0,
+                            "execution_time": result.execution_time if hasattr(result, 'execution_time') else 0.0,
                         }
                         for task_id, result in task_results.items()
                     },
@@ -1924,7 +1938,7 @@ Return ONLY the project name, nothing else."""
         # Project artifacts are already stored by sub-agents during execution
         # This method ensures all artifacts are properly linked to the project
         
-        total_artifacts = sum(len(result.artifacts) for result in task_results.values())
+        total_artifacts = sum(len(result.artifacts) if hasattr(result, 'artifacts') else 0 for result in task_results.values())
         logger.info(
             "Artifacts stored for project",
             project_id=self._current_project_id,
@@ -1958,10 +1972,10 @@ Return ONLY the project name, nothing else."""
             "tasks": [
                 {
                     "task_id": str(task_id),
-                    "success": result.success,
-                    "artifacts": [str(aid) for aid in result.artifacts],
-                    "execution_time": result.execution_time,
-                    "errors": result.errors,
+                    "success": result.success if hasattr(result, 'success') else False,
+                    "artifacts": [str(aid) for aid in result.artifacts] if hasattr(result, 'artifacts') else [],
+                    "execution_time": result.execution_time if hasattr(result, 'execution_time') else 0.0,
+                    "errors": result.errors if hasattr(result, 'errors') else [],
                 }
                 for task_id, result in task_results.items()
             ],
@@ -1969,7 +1983,7 @@ Return ONLY the project name, nothing else."""
                 "total_tasks": len(task_results),
                 "successful_tasks": sum(1 for r in task_results.values() if r.success),
                 "failed_tasks": sum(1 for r in task_results.values() if not r.success),
-                "total_artifacts": sum(len(r.artifacts) for r in task_results.values()),
+                "total_artifacts": sum(len(r.artifacts) if hasattr(r, 'artifacts') else 0 for r in task_results.values()),
             },
         }
         

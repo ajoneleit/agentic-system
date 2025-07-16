@@ -40,8 +40,11 @@ class AgentStatus(str, Enum):
     IDLE = "idle"
     INITIALIZING = "initializing"
     WORKING = "working"
+    STUCK = "stuck"
+    WAITING = "waiting"
     PAUSED = "paused"
     ERROR = "error"
+    TIMEOUT = "timeout"
     SHUTTING_DOWN = "shutting_down"
     TERMINATED = "terminated"
 
@@ -69,6 +72,19 @@ class AgentMetrics:
     errors_encountered: int = 0
     last_activity: datetime = field(default_factory=datetime.utcnow)
     
+    # Enhanced progress tracking
+    current_operation: str = "idle"
+    operation_start_time: Optional[datetime] = None
+    progress_percentage: float = 0.0
+    heartbeat_count: int = 0
+    last_heartbeat: datetime = field(default_factory=datetime.utcnow)
+    stuck_detection_count: int = 0
+    recovery_attempts: int = 0
+    
+    # Resource monitoring
+    memory_usage_mb: float = 0.0
+    cpu_usage_percent: float = 0.0
+    
     def update_task_completion(self, success: bool, execution_time: float) -> None:
         """Update metrics after task completion."""
         if success:
@@ -81,6 +97,67 @@ class AgentMetrics:
         self.average_task_time = self.total_execution_time / total_tasks if total_tasks > 0 else 0
         self.success_rate = self.tasks_completed / total_tasks if total_tasks > 0 else 1.0
         self.last_activity = datetime.utcnow()
+        
+        # Reset operation tracking
+        self.current_operation = "idle"
+        self.operation_start_time = None
+        self.progress_percentage = 0.0
+    
+    def start_operation(self, operation: str) -> None:
+        """Start tracking a new operation."""
+        self.current_operation = operation
+        self.operation_start_time = datetime.utcnow()
+        self.progress_percentage = 0.0
+        self.last_activity = datetime.utcnow()
+    
+    def update_progress(self, percentage: float, operation: Optional[str] = None) -> None:
+        """Update progress for current operation."""
+        self.progress_percentage = min(100.0, max(0.0, percentage))
+        self.last_activity = datetime.utcnow()
+        if operation:
+            self.current_operation = operation
+    
+    def heartbeat(self) -> None:
+        """Record agent heartbeat."""
+        self.heartbeat_count += 1
+        self.last_heartbeat = datetime.utcnow()
+        self.last_activity = datetime.utcnow()
+    
+    def record_stuck_detection(self) -> None:
+        """Record stuck agent detection."""
+        self.stuck_detection_count += 1
+    
+    def record_recovery_attempt(self) -> None:
+        """Record recovery attempt."""
+        self.recovery_attempts += 1
+    
+    def update_resource_usage(self, memory_mb: float, cpu_percent: float) -> None:
+        """Update resource usage metrics."""
+        self.memory_usage_mb = memory_mb
+        self.cpu_usage_percent = cpu_percent
+    
+    def get_operation_duration(self) -> float:
+        """Get duration of current operation in seconds."""
+        if self.operation_start_time:
+            return (datetime.utcnow() - self.operation_start_time).total_seconds()
+        return 0.0
+    
+    def is_stuck(self, timeout_seconds: float = 300) -> bool:
+        """Check if agent appears to be stuck."""
+        if self.current_operation == "idle":
+            return False
+        
+        # Check if operation has been running too long
+        operation_duration = self.get_operation_duration()
+        if operation_duration > timeout_seconds:
+            return True
+        
+        # Check if heartbeat is too old
+        heartbeat_age = (datetime.utcnow() - self.last_heartbeat).total_seconds()
+        if heartbeat_age > 60:  # No heartbeat for 1 minute
+            return True
+        
+        return False
 
 
 class ResourceManager:
@@ -385,36 +462,88 @@ class AgentCoordinator:
         )
     
     async def monitor_agents(self) -> None:
-        """Monitor agent health and performance."""
+        """Monitor agent health and performance with comprehensive stuck detection."""
         while True:
             try:
-                await asyncio.sleep(10)  # Check every 10 seconds
+                await asyncio.sleep(5)  # Check every 5 seconds for better responsiveness
                 
                 async with self._lock:
                     agents_to_check = list(self._agents.items())
                 
+                system_metrics = {
+                    "total_agents": len(agents_to_check),
+                    "active_agents": 0,
+                    "stuck_agents": 0,
+                    "idle_agents": 0,
+                    "working_agents": 0,
+                    "failed_agents": 0
+                }
+                
                 for agent_id, agent in agents_to_check:
                     try:
-                        # Get agent status
+                        # Get agent status and metrics
                         status_report = await agent.report_status()
-                        
-                        # Update metrics
                         metrics = self._agent_metrics.get(agent_id)
-                        if metrics:
-                            metrics.last_activity = datetime.utcnow()
+                        current_status = self._agent_status.get(agent_id, AgentStatus.IDLE)
                         
-                        # Check for stuck agents
-                        if self._agent_status.get(agent_id) == AgentStatus.WORKING:
-                            tasks = self._agent_tasks.get(agent_id, set())
-                            if tasks and metrics:
-                                # Check if agent has been working too long
-                                if (datetime.utcnow() - metrics.last_activity).seconds > 300:
+                        if metrics:
+                            # Update heartbeat
+                            metrics.heartbeat()
+                            
+                            # Update resource usage (mock data - in production would get real metrics)
+                            import psutil
+                            try:
+                                process = psutil.Process()
+                                memory_mb = process.memory_info().rss / 1024 / 1024
+                                cpu_percent = process.cpu_percent()
+                                metrics.update_resource_usage(memory_mb, cpu_percent)
+                            except:
+                                pass  # Gracefully handle if psutil not available
+                            
+                            # Check for stuck agents
+                            if metrics.is_stuck():
+                                if current_status != AgentStatus.STUCK:
                                     logger.warning(
-                                        "Agent appears stuck",
+                                        "Agent stuck detected",
                                         agent_id=str(agent_id),
-                                        tasks=len(tasks),
+                                        current_operation=metrics.current_operation,
+                                        operation_duration=metrics.get_operation_duration(),
+                                        last_heartbeat_age=(datetime.utcnow() - metrics.last_heartbeat).total_seconds(),
+                                        stuck_detection_count=metrics.stuck_detection_count
                                     )
+                                    
+                                    # Update status to stuck
+                                    self._agent_status[agent_id] = AgentStatus.STUCK
+                                    metrics.record_stuck_detection()
+                                    
+                                    # Attempt recovery
                                     await self._handle_stuck_agent(agent_id)
+                                    
+                                system_metrics["stuck_agents"] += 1
+                            
+                            # Update system metrics
+                            if current_status == AgentStatus.WORKING:
+                                system_metrics["working_agents"] += 1
+                                system_metrics["active_agents"] += 1
+                            elif current_status == AgentStatus.IDLE:
+                                system_metrics["idle_agents"] += 1
+                            elif current_status in [AgentStatus.ERROR, AgentStatus.TIMEOUT]:
+                                system_metrics["failed_agents"] += 1
+                            
+                            # Log detailed agent activity
+                            logger.info(
+                                "Agent monitoring update",
+                                agent_id=str(agent_id),
+                                status=current_status.value,
+                                current_operation=metrics.current_operation,
+                                progress=metrics.progress_percentage,
+                                operation_duration=metrics.get_operation_duration(),
+                                heartbeat_count=metrics.heartbeat_count,
+                                memory_mb=metrics.memory_usage_mb,
+                                cpu_percent=metrics.cpu_usage_percent,
+                                tasks_completed=metrics.tasks_completed,
+                                success_rate=metrics.success_rate
+                            )
                         
                     except Exception as e:
                         logger.error(
@@ -423,29 +552,130 @@ class AgentCoordinator:
                             error=str(e),
                         )
                         
+                        # Mark agent as error state
+                        self._agent_status[agent_id] = AgentStatus.ERROR
+                        system_metrics["failed_agents"] += 1
+                
+                # Log system-wide progress
+                logger.info(
+                    "System monitoring update",
+                    **system_metrics
+                )
+                        
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error("Monitor loop error", error=str(e))
     
     async def _handle_stuck_agent(self, agent_id: UUID) -> None:
-        """Handle an agent that appears to be stuck.
+        """Handle an agent that appears to be stuck with comprehensive recovery.
         
         Args:
             agent_id: ID of stuck agent
         """
-        # Send pause request
-        await self.communication_hub.send_message(
-            sender_id=uuid4(),
-            receiver_id=agent_id,
-            message_type=MessageType.PAUSE_REQUEST,
-            content={"reason": "Agent appears stuck"},
-            priority=MessagePriority.URGENT
+        metrics = self._agent_metrics.get(agent_id)
+        if not metrics:
+            return
+            
+        metrics.record_recovery_attempt()
+        
+        logger.warning(
+            "Attempting stuck agent recovery",
+            agent_id=str(agent_id),
+            recovery_attempt=metrics.recovery_attempts,
+            current_operation=metrics.current_operation,
+            operation_duration=metrics.get_operation_duration()
         )
         
-        # Update status
-        async with self._lock:
-            self._agent_status[agent_id] = AgentStatus.PAUSED
+        # Recovery strategy based on attempt count
+        if metrics.recovery_attempts == 1:
+            # First attempt: Send pause request
+            await self.communication_hub.send_message(
+                sender_id=uuid4(),
+                receiver_id=agent_id,
+                message_type=MessageType.PAUSE_REQUEST,
+                content={"reason": "Agent appears stuck - pause requested"},
+                priority=MessagePriority.URGENT
+            )
+            
+            # Update status
+            async with self._lock:
+                self._agent_status[agent_id] = AgentStatus.PAUSED
+                
+            logger.info(
+                "Stuck agent recovery - pause requested",
+                agent_id=str(agent_id),
+                recovery_attempt=metrics.recovery_attempts
+            )
+            
+        elif metrics.recovery_attempts == 2:
+            # Second attempt: Send resume request after pause
+            await asyncio.sleep(2)  # Brief pause
+            
+            await self.communication_hub.send_message(
+                sender_id=uuid4(),
+                receiver_id=agent_id,
+                message_type=MessageType.RESUME_REQUEST,
+                content={"reason": "Resume after stuck detection"},
+                priority=MessagePriority.URGENT
+            )
+            
+            # Reset operation tracking
+            metrics.current_operation = "resuming"
+            metrics.operation_start_time = datetime.utcnow()
+            metrics.progress_percentage = 0.0
+            
+            async with self._lock:
+                self._agent_status[agent_id] = AgentStatus.WORKING
+                
+            logger.info(
+                "Stuck agent recovery - resume requested",
+                agent_id=str(agent_id),
+                recovery_attempt=metrics.recovery_attempts
+            )
+            
+        elif metrics.recovery_attempts >= 3:
+            # Third attempt and beyond: Restart agent
+            logger.error(
+                "Agent stuck - attempting restart",
+                agent_id=str(agent_id),
+                recovery_attempt=metrics.recovery_attempts
+            )
+            
+            try:
+                # Get agent instance
+                agent = self._agents.get(agent_id)
+                if agent:
+                    # Attempt graceful shutdown
+                    await agent.shutdown()
+                    
+                    # Remove from tracking
+                    async with self._lock:
+                        self._agents.pop(agent_id, None)
+                        self._agent_status[agent_id] = AgentStatus.TERMINATED
+                        
+                    # Clean up resources
+                    await self.resource_manager.cleanup_agent(agent_id)
+                    
+                    logger.info(
+                        "Stuck agent terminated for restart",
+                        agent_id=str(agent_id),
+                        recovery_attempt=metrics.recovery_attempts
+                    )
+                    
+                    # TODO: In a full implementation, we would respawn the agent here
+                    # For now, we mark it as terminated
+                    
+            except Exception as e:
+                logger.error(
+                    "Failed to restart stuck agent",
+                    agent_id=str(agent_id),
+                    error=str(e)
+                )
+                
+                # Mark as error state
+                async with self._lock:
+                    self._agent_status[agent_id] = AgentStatus.ERROR
     
     async def handle_task_completion(
         self,
@@ -531,7 +761,7 @@ class AgentCoordinator:
             )
     
     async def get_system_status(self) -> Dict[str, Any]:
-        """Get overall system status.
+        """Get overall system status with comprehensive monitoring data.
         
         Returns:
             System status report
@@ -543,11 +773,22 @@ class AgentCoordinator:
             
             total_tasks = sum(len(tasks) for tasks in self._agent_tasks.values())
             
+            # Calculate system-wide metrics
+            total_stuck_detections = sum(m.stuck_detection_count for m in self._agent_metrics.values())
+            total_recovery_attempts = sum(m.recovery_attempts for m in self._agent_metrics.values())
+            avg_success_rate = sum(m.success_rate for m in self._agent_metrics.values()) / len(self._agent_metrics) if self._agent_metrics else 0
+            
             return {
                 "total_agents": len(self._agents),
                 "max_agents": self.max_agents,
                 "agent_status_breakdown": dict(status_counts),
                 "total_active_tasks": total_tasks,
+                "system_metrics": {
+                    "total_stuck_detections": total_stuck_detections,
+                    "total_recovery_attempts": total_recovery_attempts,
+                    "average_success_rate": avg_success_rate,
+                    "agents_with_issues": len([m for m in self._agent_metrics.values() if m.stuck_detection_count > 0])
+                },
                 "agents": [
                     {
                         "id": str(agent_id),
@@ -556,8 +797,19 @@ class AgentCoordinator:
                         "tasks": len(self._agent_tasks.get(agent_id, set())),
                         "metrics": {
                             "tasks_completed": metrics.tasks_completed,
+                            "tasks_failed": metrics.tasks_failed,
                             "success_rate": metrics.success_rate,
                             "average_task_time": metrics.average_task_time,
+                            "current_operation": metrics.current_operation,
+                            "operation_duration": metrics.get_operation_duration(),
+                            "progress_percentage": metrics.progress_percentage,
+                            "heartbeat_count": metrics.heartbeat_count,
+                            "last_heartbeat_age": (datetime.utcnow() - metrics.last_heartbeat).total_seconds(),
+                            "stuck_detection_count": metrics.stuck_detection_count,
+                            "recovery_attempts": metrics.recovery_attempts,
+                            "memory_usage_mb": metrics.memory_usage_mb,
+                            "cpu_usage_percent": metrics.cpu_usage_percent,
+                            "is_stuck": metrics.is_stuck()
                         } if (metrics := self._agent_metrics.get(agent_id)) else {}
                     }
                     for agent_id, agent in self._agents.items()

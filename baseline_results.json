@@ -1,0 +1,37 @@
+{
+  "memory_storage": {
+    "execution_time": 0.03271630700328387,
+    "memory_usage": 0.0,
+    "memory_peak": 0.08123970031738281,
+    "iterations": 1,
+    "throughput": 30.565797047314227
+  },
+  "task_creation": {
+    "execution_time": 0.0013444189971778542,
+    "memory_usage": 0.0,
+    "memory_peak": 0.09116935729980469,
+    "iterations": 1,
+    "throughput": 743.8157316276819
+  },
+  "artifact_serialization": {
+    "execution_time": 0.005028136016335338,
+    "memory_usage": 0.25,
+    "memory_peak": 0.1687450408935547,
+    "iterations": 1,
+    "throughput": 198.88085699177864
+  },
+  "file_operations": {
+    "execution_time": 0.30789171799551696,
+    "memory_usage": 0.0,
+    "memory_peak": 0.040988922119140625,
+    "iterations": 1,
+    "throughput": 3.2478950928279287
+  },
+  "dependency_checking": {
+    "execution_time": 0.0011205310001969337,
+    "memory_usage": 0.0,
+    "memory_peak": 0.04042625427246094,
+    "iterations": 1,
+    "throughput": 892.4340333504827
+  }
+}

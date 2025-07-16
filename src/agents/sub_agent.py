@@ -44,6 +44,12 @@ from src.core.task_result import TaskResult
 from src.prompts.agent_prompts import get_agent_prompt
 from src.utils.app_logging import log_execution_time
 from src.core.workspace_index import WorkspaceIndex
+from src.utils.enhanced_monitoring import (
+    get_monitoring_system, 
+    log_agent_activity,
+    log_progress_update,
+    LogLevel
+)
 
 # TEMP: Backward compatibility shim for test compatibility
 try:
@@ -182,17 +188,66 @@ class SubAgent(Agent):
                 task_name=task.name,
             )
             
+            # Log task start with enhanced monitoring
+            await log_agent_activity(
+                agent_id=self.id,
+                event_type="task_started",
+                level=LogLevel.INFO,
+                message=f"Starting task: {task.name}",
+                task_id=str(task.id),
+                task_name=task.name,
+                task_type=task.type if hasattr(task, 'type') else 'unknown',
+                agent_role=self.role.value
+            )
+            
+            # Update progress: Task started
+            await log_progress_update(
+                agent_id=self.id,
+                operation="task_execution",
+                progress_percentage=0.0,
+                task_id=str(task.id),
+                phase="initialization"
+            )
+            
             # Validate dependencies if context provides completed tasks
             if hasattr(context, 'completed_tasks') and task.dependencies:
+                await log_progress_update(
+                    agent_id=self.id,
+                    operation="dependency_validation",
+                    progress_percentage=10.0,
+                    task_id=str(task.id),
+                    phase="dependency_check"
+                )
+                
                 completed = getattr(context, 'completed_tasks', set())
                 if not task.is_ready(completed):
                     unsatisfied = [str(d) for d in task.dependencies if d not in completed]
+                    
+                    # Log dependency failure
+                    await log_agent_activity(
+                        agent_id=self.id,
+                        event_type="dependency_failed",
+                        level=LogLevel.ERROR,
+                        message=f"Task dependencies not satisfied: {len(unsatisfied)} unsatisfied",
+                        task_id=str(task.id),
+                        unsatisfied_dependencies=unsatisfied
+                    )
+                    
                     return Result.failure(DependencyError(
                         f"Task '{task.name}' cannot execute - {len(unsatisfied)} dependencies not satisfied: {unsatisfied}",
                         agent_id=self.id,
                         task_id=task.id,
                         details={"unsatisfied_dependencies": unsatisfied}
                     ))
+
+            # Update progress: Dependencies validated
+            await log_progress_update(
+                agent_id=self.id,
+                operation="task_execution",
+                progress_percentage=20.0,
+                task_id=str(task.id),
+                phase="execution_starting"
+            )
 
             # Execute the specific implementation
             artifacts_result = await self._execute_specific_task(task, context)
@@ -202,9 +257,33 @@ class SubAgent(Agent):
                 task_result.add_error(str(artifacts_result.get_error()))
                 task_result.end_time = datetime.now(timezone.utc)
                 task_result.execution_time = (task_result.end_time - task_result.start_time).total_seconds()
+                
+                # Log task failure
+                await log_agent_activity(
+                    agent_id=self.id,
+                    event_type="task_failed",
+                    level=LogLevel.ERROR,
+                    message=f"Task execution failed: {task.name}",
+                    task_id=str(task.id),
+                    task_name=task.name,
+                    error=str(artifacts_result.get_error()),
+                    execution_time=task_result.execution_time,
+                    agent_role=self.role.value
+                )
+                
                 return Result.failure(artifacts_result.get_error())
             
             artifacts = artifacts_result.unwrap()
+
+            # Update progress: Artifacts processing
+            await log_progress_update(
+                agent_id=self.id,
+                operation="artifact_processing",
+                progress_percentage=80.0,
+                task_id=str(task.id),
+                phase="storing_artifacts",
+                artifacts_count=len(artifacts)
+            )
 
             # Store artifacts using artifact manager if available
             if context.artifact_manager:
@@ -230,12 +309,37 @@ class SubAgent(Agent):
             task_result.end_time = datetime.now(timezone.utc)
             task_result.execution_time = (task_result.end_time - task_result.start_time).total_seconds()
 
+            # Update progress: Task completed
+            await log_progress_update(
+                agent_id=self.id,
+                operation="task_completion",
+                progress_percentage=100.0,
+                task_id=str(task.id),
+                phase="completed",
+                artifacts_produced=len(artifacts)
+            )
+
             logger.info(
                 "Task completed successfully",
                 agent_id=str(self.id),
                 task_id=str(task.id),
                 artifacts_produced=len(artifacts),
                 execution_time=task_result.execution_time,
+            )
+
+            # Log task completion with enhanced monitoring
+            await log_agent_activity(
+                agent_id=self.id,
+                event_type="task_completed",
+                level=LogLevel.INFO,
+                message=f"Task completed successfully: {task.name}",
+                task_id=str(task.id),
+                task_name=task.name,
+                status="success",
+                execution_time=task_result.execution_time,
+                artifacts_produced=len(artifacts),
+                agent_role=self.role.value,
+                task_type=task.type if hasattr(task, 'type') else 'unknown'
             )
 
             return Result.success(task_result)
@@ -253,6 +357,20 @@ class SubAgent(Agent):
             task_result.add_error(str(e))
             task_result.end_time = datetime.now(timezone.utc)
             task_result.execution_time = (task_result.end_time - task_result.start_time).total_seconds()
+
+            # Log exception with enhanced monitoring
+            await log_agent_activity(
+                agent_id=self.id,
+                event_type="task_exception",
+                level=LogLevel.ERROR,
+                message=f"Task execution threw exception: {task.name}",
+                task_id=str(task.id),
+                task_name=task.name,
+                error=str(e),
+                error_type=type(e).__name__,
+                execution_time=task_result.execution_time,
+                agent_role=self.role.value
+            )
 
             return Result.failure(AgentResultError(
                 f"Task execution failed: {str(e)}",

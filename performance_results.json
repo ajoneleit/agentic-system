@@ -1,0 +1,34 @@
+{
+  "memory_storage": {
+    "original": {
+      "time": 0.024422064976533875,
+      "memory": 0,
+      "throughput": 4094.6578471593516
+    },
+    "optimized": {
+      "time": 0.0005973550141789019,
+      "memory": 0,
+      "throughput": 167404.63815718636
+    },
+    "improvements": {
+      "time_improvement_percent": 97.55403560365238,
+      "memory_improvement_percent": 0,
+      "throughput_improvement": 40.88366950447948
+    }
+  },
+  "task_creation": {
+    "original": {
+      "time": 0.0016560559743084013,
+      "throughput": 60384.432381134815
+    },
+    "optimized": {
+      "time": 0.0003459750150796026,
+      "throughput": 289038.21270733036
+    },
+    "improvements": {
+      "time_improvement_percent": 79.10849509636364,
+      "throughput_improvement": 4.7866345895739695
+    }
+  },
+  "summary": "Performance Optimization Summary\n===================================\n\nMemory Storage:\n  Time improvement: 97.6%\n  Memory improvement: 0.0%\n  Throughput improvement: 40.88x\n\nTask Creation:\n  Time improvement: 79.1%\n  Throughput improvement: 4.79x\n\nOverall Results:\n  Average time improvement: 88.3%\n  Average throughput improvement: 22.84x\n"
+}

@@ -15,6 +15,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 import click
 from rich.console import Console
@@ -29,6 +30,7 @@ from src.agents.evolutionary_agent import EvolutionaryAgent
 from src.agents.meta_agent import MetaAgent
 from src.core.interfaces import AgentRole
 from src.interface.slash_commands import ZeroInterface, CommandResult
+from monitoring_dashboard import MonitoringDashboard
 
 # Configure logging
 logger = get_logger(__name__)
@@ -38,7 +40,7 @@ console = Console()
 class ZeroSystem:
     """Main /zero system orchestrator"""
     
-    def __init__(self, config_path: Optional[Path] = None):
+    def __init__(self, config_path: Optional[Path] = None, enable_monitoring: bool = False, monitoring_update_interval: int = 2):
         self.settings = get_settings()
         self.artifacts_path = Path("./projects")
         self.artifacts_path.mkdir(exist_ok=True)
@@ -56,6 +58,12 @@ class ZeroSystem:
         self.evolution_agent = None
         self.interface = None
         self.initialized = False
+        
+        # Monitoring dashboard configuration
+        self.enable_monitoring = enable_monitoring
+        self.monitoring_update_interval = monitoring_update_interval
+        self.monitoring_dashboard = None
+        self.monitoring_task = None
     
     async def initialize(self):
         """Initialize all system components"""
@@ -65,13 +73,13 @@ class ZeroSystem:
             # Initialize Meta Agent
             console.print("  • Creating Meta Agent...")
             self.meta_agent = MetaAgent(
-                artifact_storage_path=self.artifacts_path,
-                use_cli_for_subagents=True
+                artifact_storage_path=self.artifacts_path
             )
             
             # Initialize Evolutionary Agent
             console.print("  • Creating Evolutionary Agent...")
             self.evolution_agent = EvolutionaryAgent(
+                agent_id=uuid4(),
                 role=AgentRole.CORE_LOGIC,
                 artifact_storage_path=self.artifacts_path,
                 evolution_enabled=True
@@ -88,6 +96,11 @@ class ZeroSystem:
             # Verify MCP servers
             console.print("  • Checking MCP servers...")
             await self._verify_mcp_servers()
+            
+            # Initialize monitoring dashboard if enabled
+            if self.enable_monitoring:
+                console.print("  • Initializing monitoring dashboard...")
+                await self._initialize_monitoring_dashboard()
             
             self.initialized = True
             console.print("[bold green]✅ /zero System Ready![/bold green]\n")
@@ -118,6 +131,46 @@ class ZeroSystem:
             console.print(f"[yellow]  ⚠️  Missing MCP servers: {', '.join(missing)}[/yellow]")
             console.print("     Some advanced features may be limited.")
     
+    async def _initialize_monitoring_dashboard(self):
+        """Initialize the monitoring dashboard with real coordinator."""
+        try:
+            # Create dashboard with real AgentCoordinator from meta_agent
+            if self.meta_agent and hasattr(self.meta_agent, 'coordinator'):
+                self.monitoring_dashboard = MonitoringDashboard(
+                    coordinator=self.meta_agent.coordinator,
+                    update_interval=self.monitoring_update_interval
+                )
+                console.print("    ✅ Monitoring dashboard initialized with real coordinator")
+            else:
+                console.print("    ⚠️  Meta agent or coordinator not available for monitoring")
+        except Exception as e:
+            console.print(f"    ❌ Failed to initialize monitoring dashboard: {e}")
+            logger.error("Monitoring dashboard initialization failed", error=str(e))
+    
+    async def _start_monitoring_dashboard(self):
+        """Start the monitoring dashboard in a separate task."""
+        if not self.monitoring_dashboard:
+            return
+            
+        try:
+            console.print("\n[bold blue]🔍 Starting monitoring dashboard...[/bold blue]")
+            console.print("Dashboard will open in a separate view")
+            console.print("Press Ctrl+C to return to main system")
+            
+            # Run dashboard in a separate task
+            self.monitoring_task = asyncio.create_task(
+                self.monitoring_dashboard.run()
+            )
+            
+            # Wait for dashboard to complete
+            await self.monitoring_task
+            
+        except asyncio.CancelledError:
+            console.print("\n[yellow]📊 Monitoring dashboard stopped[/yellow]")
+        except Exception as e:
+            console.print(f"[red]❌ Monitoring dashboard error: {e}[/red]")
+            logger.error("Monitoring dashboard error", error=str(e))
+    
     async def run_interactive(self):
         """Run in interactive mode"""
         if not self.initialized:
@@ -135,6 +188,14 @@ class ZeroSystem:
                 if user_input.lower() in ["exit", "quit", "/exit", "/quit"]:
                     console.print("[yellow]👋 Goodbye![/yellow]")
                     break
+                
+                # Check for monitoring dashboard command
+                if user_input.lower() in ["/monitor", "/dashboard", "/monitoring"]:
+                    if self.monitoring_dashboard:
+                        await self._start_monitoring_dashboard()
+                    else:
+                        console.print("[yellow]⚠️  Monitoring dashboard not enabled. Use --enable-monitoring flag.[/yellow]")
+                    continue
                 
                 # Process input
                 result = await self.interface.process_input(user_input)
@@ -168,12 +229,16 @@ class ZeroSystem:
     
     def _show_welcome(self):
         """Show welcome message"""
+        monitoring_info = ""
+        if self.enable_monitoring:
+            monitoring_info = "\n📊 Monitoring enabled: Type [bold]/monitor[/bold] to open dashboard"
+        
         welcome = Panel(
-            """[bold cyan]/zero[/bold cyan] - Evolutionary Agentic System
+            f"""[bold cyan]/zero[/bold cyan] - Evolutionary Agentic System
             
 🧬 Powered by interaction nets and geometric evolution
 🔄 Self-improving through pattern learning
-🚀 Parallel execution with MECE decomposition
+🚀 Parallel execution with MECE decomposition{monitoring_info}
 
 Type [bold]/help[/bold] for commands or just describe what you want to build!
 Type [bold]exit[/bold] to quit.""",
@@ -242,6 +307,17 @@ Type [bold]exit[/bold] to quit.""",
     
     async def shutdown(self):
         """Shutdown the system"""
+        # Stop monitoring dashboard if running
+        if self.monitoring_task and not self.monitoring_task.done():
+            self.monitoring_task.cancel()
+            try:
+                await self.monitoring_task
+            except asyncio.CancelledError:
+                pass
+        
+        if self.monitoring_dashboard:
+            self.monitoring_dashboard.stop()
+        
         if self.meta_agent:
             await self.meta_agent.shutdown()
         
@@ -252,7 +328,9 @@ Type [bold]exit[/bold] to quit.""",
 @click.argument('task', required=False)
 @click.option('--config', type=click.Path(exists=True), help='Path to configuration file')
 @click.option('--verbose', is_flag=True, help='Enable verbose output')
-def main(task: Optional[str], config: Optional[str], verbose: bool):
+@click.option('--enable-monitoring', is_flag=True, help='Enable real-time monitoring dashboard')
+@click.option('--monitoring-update-interval', default=2, help='Dashboard update interval in seconds')
+def main(task: Optional[str], config: Optional[str], verbose: bool, enable_monitoring: bool, monitoring_update_interval: int):
     """
     /zero - Evolutionary Agentic System
     
@@ -267,7 +345,11 @@ def main(task: Optional[str], config: Optional[str], verbose: bool):
     
     # Create system
     config_path = Path(config) if config else None
-    system = ZeroSystem(config_path)
+    system = ZeroSystem(
+        config_path=config_path,
+        enable_monitoring=enable_monitoring,
+        monitoring_update_interval=monitoring_update_interval
+    )
     
     # Run async main
     async def async_main():

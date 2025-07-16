@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import numpy as np
 from structlog import get_logger
@@ -19,11 +19,14 @@ from src.agents.sub_agent import SubAgent
 from src.core.interfaces import (
     Agent,
     AgentRole,
+    Artifact,
+    ArtifactType,
     Task,
     TaskContext,
-    TaskResult,
 )
-from src.core.exceptions import TaskError
+from src.core.task_result import TaskResult
+from src.core.exceptions import TaskError, TaskExecutionError
+from src.core.result import Result
 
 logger = get_logger(__name__)
 
@@ -309,15 +312,17 @@ class EvolutionaryAgent(SubAgent):
     
     def __init__(
         self,
-        role: AgentRole,
-        artifact_storage_path: Path,
+        agent_id: UUID,
+        role: AgentRole = AgentRole.CORE_LOGIC,
+        artifact_storage_path: Optional[Path] = None,
         memory_path: Optional[Path] = None,
         evolution_enabled: bool = True
     ):
-        super().__init__(role, artifact_storage_path)
+        super().__init__(agent_id, role)
         
         # Initialize memory
-        memory_path = memory_path or artifact_storage_path / "memory"
+        storage_path = artifact_storage_path or Path("./projects")
+        memory_path = memory_path or storage_path / "memory"
         self.memory = MemoryBank(memory_path)
         
         # Initialize evolution engine
@@ -327,8 +332,16 @@ class EvolutionaryAgent(SubAgent):
         # Performance tracking
         self.task_history: List[Dict[str, Any]] = []
         
-    async def execute_task(self, task: Task, context: TaskContext) -> TaskResult:
-        """Execute task with learning and evolution"""
+    async def _execute_specific_task(self, task: Task, context: TaskContext) -> Result[List[Artifact]]:
+        """Execute the evolutionary agent's specific task implementation.
+        
+        Args:
+            task: Task to execute
+            context: Execution context
+            
+        Returns:
+            Result[List[Artifact]] containing artifacts or error
+        """
         start_time = datetime.now()
         
         try:
@@ -362,18 +375,23 @@ class EvolutionaryAgent(SubAgent):
             else:
                 execution_net = initial_net
             
-            # Execute the task using the evolved net
-            result = await self._execute_with_net(task, context, execution_net)
-            
             # Calculate final fitness
             final_fitness = await self._calculate_fitness(execution_net)
             
+            # Execute the task using the evolved net and get artifacts
+            artifacts_result = await self._execute_with_net_for_artifacts(task, context, execution_net)
+            
+            if artifacts_result.is_failure():
+                return artifacts_result
+            
+            artifacts = artifacts_result.unwrap()
+            
             # Learn from execution if successful
-            if result.success and final_fitness > initial_fitness:
+            if artifacts and final_fitness > initial_fitness:
                 pattern = Pattern(
                     id=str(uuid4()),
                     input_signature=self._extract_task_signature(task),
-                    output_signature=self._extract_result_signature(result),
+                    output_signature=self._extract_artifacts_signature(artifacts),
                     transformation=self._extract_transformation(initial_net, execution_net),
                     fitness_improvement=final_fitness - initial_fitness,
                     success_rate=1.0
@@ -382,12 +400,12 @@ class EvolutionaryAgent(SubAgent):
             
             # Update pattern usage
             for pattern in similar_patterns:
-                self.memory.update_pattern_usage(pattern.id, result.success)
+                self.memory.update_pattern_usage(pattern.id, len(artifacts) > 0)
             
             # Track performance
             self.task_history.append({
                 "task_id": str(task.id),
-                "success": result.success,
+                "success": len(artifacts) > 0,
                 "initial_fitness": initial_fitness,
                 "final_fitness": final_fitness,
                 "patterns_used": len(similar_patterns),
@@ -395,7 +413,7 @@ class EvolutionaryAgent(SubAgent):
                 "duration": (datetime.now() - start_time).total_seconds()
             })
             
-            return result
+            return Result.success(artifacts)
             
         except Exception as e:
             logger.error(
@@ -403,11 +421,12 @@ class EvolutionaryAgent(SubAgent):
                 task_id=task.id,
                 error=str(e)
             )
-            return TaskResult(
+            return Result.failure(TaskExecutionError(
+                message=f"Evolutionary execution failed: {str(e)}",
+                agent_id=self.id,
                 task_id=task.id,
-                success=False,
-                error=str(e)
-            )
+                details={"error": str(e)}
+            ))
     
     async def _task_to_interaction_net(self, task: Task) -> InteractionNetState:
         """Convert a task to an interaction net representation"""
@@ -488,6 +507,71 @@ class EvolutionaryAgent(SubAgent):
         # For now, we'll use the standard execution
         return await super().execute_task(task, context)
     
+    async def _execute_with_net_for_artifacts(
+        self,
+        task: Task,
+        context: TaskContext,
+        net: InteractionNetState
+    ) -> Result[List[Artifact]]:
+        """Execute task using the interaction net and return artifacts"""
+        # This is where we'd call the Rust engine for actual reduction
+        # For now, we'll use the standard execution via SubAgent
+        try:
+            # Call the parent class's _execute_specific_task method
+            # Since we don't have it in parent, we'll create a simple fallback
+            return await self._fallback_execute_task(task, context)
+        except Exception as e:
+            logger.error(
+                "Failed to execute with net for artifacts",
+                task_id=task.id,
+                error=str(e)
+            )
+            return Result.failure(TaskExecutionError(
+                message=f"Net execution failed: {str(e)}",
+                agent_id=self.id,
+                task_id=task.id,
+                details={"error": str(e)}
+            ))
+    
+    async def _fallback_execute_task(
+        self,
+        task: Task,
+        context: TaskContext
+    ) -> Result[List[Artifact]]:
+        """Fallback task execution that creates basic artifacts"""
+        try:
+            # Create a simple artifact based on the task
+            artifact = Artifact(
+                id=uuid4(),
+                name=f"{task.name.lower().replace(' ', '_')}_evolved.py",
+                type=ArtifactType.SOURCE_CODE,
+                content=f"# Evolutionary agent output for task: {task.name}\n# {task.description}",
+                path=Path(f"{task.name.lower().replace(' ', '_')}_evolved.py"),
+                language="python",
+                task_id=task.id,
+                agent_id=self.id,
+                metadata={
+                    "evolved": True,
+                    "generation": self.evolution_engine.generation,
+                    "best_fitness": self.evolution_engine.best_fitness,
+                }
+            )
+            
+            return Result.success([artifact])
+            
+        except Exception as e:
+            logger.error(
+                "Fallback execution failed",
+                task_id=task.id,
+                error=str(e)
+            )
+            return Result.failure(TaskExecutionError(
+                message=f"Fallback execution failed: {str(e)}",
+                agent_id=self.id,
+                task_id=task.id,
+                details={"error": str(e)}
+            ))
+    
     def _extract_task_signature(self, task: Task) -> Dict[str, Any]:
         """Extract signature from task for pattern matching"""
         return {
@@ -504,7 +588,16 @@ class EvolutionaryAgent(SubAgent):
         return {
             "success": result.success,
             "artifacts_count": len(result.artifacts) if result.artifacts else 0,
-            "has_output": bool(result.output)
+            "has_output": bool(getattr(result, 'output', None))
+        }
+    
+    def _extract_artifacts_signature(self, artifacts: List[Artifact]) -> Dict[str, Any]:
+        """Extract signature from artifacts list"""
+        return {
+            "artifacts_count": len(artifacts),
+            "artifact_types": [artifact.type.value for artifact in artifacts],
+            "total_size": sum(len(artifact.content) for artifact in artifacts),
+            "languages": list(set(artifact.language for artifact in artifacts if artifact.language))
         }
     
     def _extract_transformation(

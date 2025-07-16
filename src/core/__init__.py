@@ -46,6 +46,7 @@ from .interfaces import (
     TaskStatus,
     Verifier,
 )
+from .task_result import TaskResult
 
 __all__ = [
     # Interfaces
@@ -60,6 +61,7 @@ __all__ = [
     "Task",
     "TaskContext",
     "TaskPriority",
+    "TaskResult",
     "TaskStatus",
     "Verifier",
     # Exceptions
