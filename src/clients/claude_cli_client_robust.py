@@ -516,6 +516,52 @@ class ClaudeCodeClient:
             logger.error(f"Failed to check Claude Code: {str(e)}")
             return False
     
+    async def health_check(self) -> dict:
+        """Perform health check with minimal API request.
+        
+        Returns:
+            Dictionary with health check results
+        """
+        from anthropic import AsyncAnthropic
+        from config import get_settings, ClaudeModel
+        
+        try:
+            settings = get_settings()
+            api_key = settings.api.key.get_secret_value()
+            
+            if not api_key:
+                return {
+                    "status": "error",
+                    "message": "No API key configured"
+                }
+            
+            # Create minimal API client for health check
+            async with AsyncAnthropic(api_key=api_key) as client:
+                response = await client.messages.create(
+                    model=ClaudeModel.HAIKU.value,
+                    messages=[{"role": "user", "content": "Hi"}],
+                    max_tokens=10,
+                    temperature=0,
+                )
+                
+                if response and response.content:
+                    return {
+                        "status": "ok",
+                        "message": "Claude API connection successful",
+                        "model": response.model,
+                        "tokens_used": response.usage.input_tokens + response.usage.output_tokens,
+                    }
+                else:
+                    return {
+                        "status": "error",
+                        "message": "Unexpected API response format"
+                    }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Health check failed: {str(e)}"
+            }
+    
     async def close(self):
         """Close the client and clean up resources."""
         _cleanup_temp_files()

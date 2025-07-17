@@ -53,7 +53,7 @@ from src.utils.enhanced_monitoring import (
 
 # TEMP: Backward compatibility shim for test compatibility
 try:
-    from src.clients.claude_client import ClaudeClient as _ClaudeClient
+    from src.clients.health_client import ClaudeClient as _ClaudeClient
     ClaudeClient = _ClaudeClient  # TEMP shim for test compatibility
 except ImportError:
     ClaudeClient = None  # Fallback if module doesn't exist

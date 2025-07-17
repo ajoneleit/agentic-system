@@ -9,7 +9,7 @@ import pytest
 from anthropic import APIError as AnthropicAPIError, RateLimitError
 from anthropic.types import Message, Usage, TextBlock, ToolUseBlock
 
-from src.clients.claude_client import ClaudeClient
+from src.clients.health_client import ClaudeClient
 from src.core.exceptions import (
     APIError,
     APIRateLimitError,
@@ -24,7 +24,7 @@ class TestClaudeClient:
     @pytest.fixture
     def claude_client(self):
         """Create ClaudeClient instance with mocked API client."""
-        with patch('src.clients.claude_client.AsyncAnthropic') as mock_anthropic:
+        with patch('src.clients.health_client.AsyncAnthropic') as mock_anthropic:
             client = ClaudeClient()
             yield client
     

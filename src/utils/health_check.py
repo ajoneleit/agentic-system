@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from structlog import get_logger
 
 from config import ClaudeModel, Environment, get_settings, reload_settings
-from src.clients.claude_client import ClaudeClient
+from src.clients.health_client import ClaudeClient
 from src.core.exceptions import (
     APIError,
     APIKeyError,
