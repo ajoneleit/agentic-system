@@ -159,6 +159,9 @@ logs/
 .env.local
 .env.*.local
 
+# mcp
+.mcp.json
+
 # Projects directory - ignore all subdirectories except artifacts and index.json
 projects/*/
 !projects/artifacts/
