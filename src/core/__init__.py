@@ -5,9 +5,9 @@ the system.
 """
 
 from .exceptions import (
-    AgenticSystemError,
     AgentCommunicationError,
     AgentError,
+    AgenticSystemError,
     AgentInitializationError,
     AgentOverloadError,
     APIError,
@@ -24,8 +24,8 @@ from .exceptions import (
     InvalidConfigurationError,
     MissingConfigurationError,
     QualityCheckError,
-    TaskDependencyError,
     TaskDecompositionError,
+    TaskDependencyError,
     TaskError,
     TaskExecutionError,
     TestFailureError,

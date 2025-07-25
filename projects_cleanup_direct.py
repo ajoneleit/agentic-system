@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Direct cleanup of projects directory."""
 
-import os
 import shutil
 from pathlib import Path
 
@@ -17,7 +16,7 @@ keep_items = {'artifacts', 'index.json', 'metadata'}
 try:
     all_items = list(projects_dir.iterdir())
     print(f"Found {len(all_items)} items in projects directory")
-    
+
     for item in all_items:
         if item.name in keep_items:
             print(f"KEEPING: {item.name}")
@@ -31,14 +30,14 @@ try:
                 print(f"  ✅ Successfully removed {item.name}")
             except Exception as e:
                 print(f"  ❌ Error removing {item.name}: {e}")
-    
+
     # Show final state
     remaining = list(projects_dir.iterdir())
     print(f"\n📁 Final state - {len(remaining)} items remaining:")
     for item in sorted(remaining):
         print(f"  - {item.name}")
-        
+
 except Exception as e:
     print(f"Error during cleanup: {e}")
-    
+
 print("Cleanup complete!")

@@ -1,6 +1,7 @@
 import os
 import shutil
 
+
 # Function to remove a directory
 def remove_directory(path):
     if os.path.exists(path):

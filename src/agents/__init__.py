@@ -2,12 +2,12 @@
 
 from .meta_agent import MetaAgent, ProjectResult
 from .sub_agent import (
-    SubAgent,
     CodeGeneratorAgent,
-    TestWriterAgent,
+    DebugAgent,
     DocumentationAgent,
     RefactorAgent,
-    DebugAgent,
+    SubAgent,
+    TestWriterAgent,
 )
 
 __all__ = [

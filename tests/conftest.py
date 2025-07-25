@@ -6,11 +6,12 @@ including mocks, test data generators, and async support.
 
 import asyncio
 import sys
+from collections.abc import AsyncGenerator
 from datetime import datetime
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, Generator, List
+from typing import Any, List
 from unittest.mock import AsyncMock, MagicMock, Mock
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -22,8 +23,8 @@ from pydantic import SecretStr
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import (
-    APISettings,
     AgentSettings,
+    APISettings,
     ClaudeModel,
     Environment,
     Settings,
@@ -128,7 +129,7 @@ def sample_tasks() -> List[Task]:
         status=TaskStatus.COMPLETED,
         priority=TaskPriority.HIGH,
     )
-    
+
     task2 = Task(
         id=uuid4(),
         name="Implement Core Logic",
@@ -137,7 +138,7 @@ def sample_tasks() -> List[Task]:
         priority=TaskPriority.HIGH,
         dependencies=[task1.id],
     )
-    
+
     task3 = Task(
         id=uuid4(),
         name="Write Tests",
@@ -147,7 +148,7 @@ def sample_tasks() -> List[Task]:
         dependencies=[task2.id],
         required_role=AgentRole.TESTING,
     )
-    
+
     task4 = Task(
         id=uuid4(),
         name="Generate Documentation",
@@ -157,7 +158,7 @@ def sample_tasks() -> List[Task]:
         dependencies=[task2.id],
         required_role=AgentRole.DOCUMENTATION,
     )
-    
+
     return [task1, task2, task3, task4]
 
 
@@ -185,7 +186,7 @@ def sample_artifacts() -> List[Artifact]:
     """Generate multiple sample artifacts."""
     task_id = uuid4()
     agent_id = uuid4()
-    
+
     source_artifact = Artifact(
         id=uuid4(),
         type=ArtifactType.SOURCE_CODE,
@@ -202,7 +203,7 @@ def sample_artifacts() -> List[Artifact]:
         task_id=task_id,
         agent_id=agent_id,
     )
-    
+
     test_artifact = Artifact(
         id=uuid4(),
         type=ArtifactType.TEST_CODE,
@@ -224,7 +225,7 @@ def test_subtract():
         agent_id=agent_id,
         dependencies=[source_artifact.id],
     )
-    
+
     return [source_artifact, test_artifact]
 
 
@@ -259,9 +260,9 @@ async def mock_agent() -> AsyncGenerator[Agent, None]:
         "status": agent.status,
         "completed_tasks": 0,
     })
-    
+
     yield agent
-    
+
     # Cleanup
     await agent.shutdown()
 
@@ -278,7 +279,7 @@ def event_loop_policy():
 # Test utilities
 class TestDataGenerator:
     """Generate test data for various scenarios."""
-    
+
     @staticmethod
     def create_task(
         name: str = "Test Task",
@@ -295,7 +296,7 @@ class TestDataGenerator:
         }
         defaults.update(kwargs)
         return Task(name=name, status=status, **defaults)
-    
+
     @staticmethod
     def create_artifact(
         name: str = "test.py",
@@ -319,7 +320,7 @@ class TestDataGenerator:
             type=artifact_type,
             **defaults,
         )
-    
+
     @staticmethod
     def create_message_response(
         content: str = "Test response",
@@ -372,7 +373,7 @@ def setup_test_environment(monkeypatch, tmp_path):
     monkeypatch.setenv("ACS_DEBUG", "true")
     monkeypatch.setenv("ACS_STORAGE__BASE_PATH", str(tmp_path / "artifacts"))
     monkeypatch.setenv("ACS_LOGGING__LEVEL", "DEBUG")
-    
+
     # Create necessary directories
     (tmp_path / "artifacts").mkdir(exist_ok=True)
     (tmp_path / "logs").mkdir(exist_ok=True)
@@ -383,12 +384,12 @@ def setup_test_environment(monkeypatch, tmp_path):
 async def cleanup_async_tasks():
     """Ensure all async tasks are cleaned up after each test."""
     yield
-    
+
     # Cancel any remaining tasks
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     for task in tasks:
         task.cancel()
-    
+
     # Wait for cancellation
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)

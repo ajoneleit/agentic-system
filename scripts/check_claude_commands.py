@@ -2,7 +2,7 @@
 """Check what Claude commands are actually available."""
 
 import subprocess
-import sys
+
 
 def run_command(cmd, description):
     """Run a command and show results."""
@@ -25,11 +25,12 @@ def run_command(cmd, description):
         print(f"Error: {e}")
         return False
 
+
 def main():
     """Check Claude commands."""
     print("CHECKING CLAUDE COMMANDS")
     print("=" * 50)
-    
+
     commands = [
         ("claude --version", "Check Claude version"),
         ("claude --help", "Check Claude help"),
@@ -38,9 +39,10 @@ def main():
         ("which claude", "Find Claude location"),
         ("ls -la $(which claude)", "Check Claude binary details"),
     ]
-    
+
     for cmd, desc in commands:
         run_command(cmd, desc)
+
 
 if __name__ == "__main__":
     main()

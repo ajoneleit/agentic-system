@@ -11,7 +11,7 @@ try:
     if os.path.exists(base_path):
         all_items = os.listdir(base_path)
         print(f"Found {len(all_items)} total items")
-        
+
         removed_count = 0
         for item in all_items:
             if item not in keep_items:
@@ -29,23 +29,23 @@ try:
                     print(f"Error removing {item}: {e}")
             else:
                 print(f"Keeping: {item}")
-        
+
         print(f"\nRemoved {removed_count} items")
-        
+
         # Show final state
         final_items = os.listdir(base_path)
         print(f"Remaining items ({len(final_items)}):")
         for item in final_items:
             print(f"  {item}")
-            
+
         if set(final_items) == set(keep_items):
             print("SUCCESS: Cleanup completed successfully!")
         else:
             print("WARNING: Unexpected items remain")
-            
+
     else:
         print(f"ERROR: {base_path} does not exist")
-        
+
 except Exception as e:
     print(f"ERROR: {e}")
     import traceback

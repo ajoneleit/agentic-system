@@ -1,0 +1,15 @@
+{
+  "timestamp": "2025-07-23T18:50:06Z",
+  "python_tests": {
+    "unit": 15,
+    "integration": 12,
+    "performance": 0,
+    "validation": 10,
+    "ui": 6,
+    "total": 507,
+    "other": 464
+  },
+  "rust_tests": 0,
+  "total_tests": 507,
+  "badge_url": "https://img.shields.io/badge/tests-507-brightgreen?style=flat-square"
+}

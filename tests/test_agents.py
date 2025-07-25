@@ -1,6 +1,5 @@
 """Comprehensive tests for the agent system."""
 
-import asyncio
 import json
 import sys
 from pathlib import Path
@@ -11,28 +10,18 @@ from uuid import uuid4
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
-from anthropic.types import Message, Usage
 
 from src.agents import (
+    CodeGeneratorAgent,
     MetaAgent,
     ProjectResult,
-    CodeGeneratorAgent,
-    TestWriterAgent,
-    DocumentationAgent,
-    RefactorAgent,
-    DebugAgent,
 )
 from src.core.exceptions import (
-    AgentError,
     TaskDecompositionError,
-    TaskExecutionError,
 )
 from src.core.interfaces import (
     AgentRole,
-    Artifact,
-    ArtifactType,
     Task,
-    TaskContext,
     TaskPriority,
     TaskStatus,
 )
@@ -77,7 +66,7 @@ class TestSubAgent:
         agent = CodeGeneratorAgent(uuid4())
 
         result = await agent.execute_task(sample_task, task_context)
-        
+
         assert result.is_failure()
         assert "not initialized" in str(result.get_error())
 
@@ -405,7 +394,7 @@ class TestMetaAgent:
 
         # Process request
         result_wrapper = await meta_agent.process_request(user_request)
-        
+
         assert result_wrapper.is_success()
         result = result_wrapper.unwrap()
         assert isinstance(result, ProjectResult)

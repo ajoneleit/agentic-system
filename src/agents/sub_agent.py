@@ -9,28 +9,22 @@ import json
 from abc import abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from uuid import UUID, uuid4
 
 from structlog import get_logger
 
-from config import get_settings, ClaudeModel
+from config import ClaudeModel
 from src.clients.claude_cli_client_robust import ClaudeCodeClient
-from src.core.communication import Message, MessageType
-from src.core.exceptions import (
-    AgentError,
-    TaskExecutionError,
-)
-from src.core.result import Result, AsyncResult, collect_results
 from src.core.agent_errors import (
     AgentResultError,
-    InputValidationError,
-    DependencyError,
     CLIError,
     CLINotAvailableError,
     CLIResponseError,
+    DependencyError,
     WorkspaceError,
 )
+from src.core.communication import Message
 from src.core.interfaces import (
     Agent,
     AgentRole,
@@ -38,22 +32,22 @@ from src.core.interfaces import (
     ArtifactType,
     Task,
     TaskContext,
-    TaskStatus,
 )
+from src.core.result import Result
 from src.core.task_result import TaskResult
+from src.core.workspace_index import WorkspaceIndex
 from src.prompts.agent_prompts import get_agent_prompt
 from src.utils.app_logging import log_execution_time
-from src.core.workspace_index import WorkspaceIndex
 from src.utils.enhanced_monitoring import (
-    get_monitoring_system, 
+    LogLevel,
     log_agent_activity,
     log_progress_update,
-    LogLevel
 )
 
 # TEMP: Backward compatibility shim for test compatibility
 try:
     from src.clients.health_client import ClaudeClient as _ClaudeClient
+
     ClaudeClient = _ClaudeClient  # TEMP shim for test compatibility
 except ImportError:
     ClaudeClient = None  # Fallback if module doesn't exist
@@ -70,6 +64,7 @@ class SubAgent(Agent):
         Args:
             agent_id: Unique agent identifier
             role: Agent's specialized role
+
         """
         super().__init__(agent_id, role)
         self.claude_code_client: Optional[ClaudeCodeClient] = None
@@ -91,28 +86,29 @@ class SubAgent(Agent):
 
         Args:
             context: Task execution context
-            
+
         Returns:
             Result[None] indicating success or failure
+
         """
         try:
             self.context = context
 
             # Sub-agents ALWAYS use Claude Code
             self.claude_code_client = ClaudeCodeClient()
-            
+
             # Check if CLI is available
             if not await self.claude_code_client.check_cli_available():
-                return Result.failure(CLINotAvailableError(
-                    "Claude Code is required for sub-agents but is not available. "
-                    "Please ensure 'claude' command is installed and in PATH.",
-                    agent_id=self.id
-                ))
-            
+                return Result.failure(
+                    CLINotAvailableError(
+                        "Claude Code is required for sub-agents but is not available. "
+                        "Please ensure 'claude' command is installed and in PATH.",
+                        agent_id=self.id,
+                    )
+                )
+
             logger.info(
-                "SubAgent initialized with Claude Code",
-                agent_id=str(self.id),
-                role=self.role.value
+                "SubAgent initialized with Claude Code", agent_id=str(self.id), role=self.role.value
             )
 
             # Start message processing
@@ -126,22 +122,19 @@ class SubAgent(Agent):
                 agent_id=str(self.id),
                 role=self.role.value,
             )
-            
+
             return Result.success(None)
-            
+
         except Exception as e:
-            logger.error(
-                "Failed to initialize agent",
-                agent_id=str(self.id),
-                error=str(e)
+            logger.error("Failed to initialize agent", agent_id=str(self.id), error=str(e))
+            return Result.failure(
+                AgentResultError(f"Agent initialization failed: {str(e)}", agent_id=self.id)
             )
-            return Result.failure(AgentResultError(
-                f"Agent initialization failed: {str(e)}",
-                agent_id=self.id
-            ))
 
     @abstractmethod
-    async def _execute_specific_task(self, task: Task, context: TaskContext) -> Result[List[Artifact]]:
+    async def _execute_specific_task(
+        self, task: Task, context: TaskContext
+    ) -> Result[list[Artifact]]:
         """Execute the agent's specific task implementation.
 
         Args:
@@ -150,6 +143,7 @@ class SubAgent(Agent):
 
         Returns:
             Result[List[Artifact]] containing artifacts or error
+
         """
         pass
 
@@ -163,14 +157,13 @@ class SubAgent(Agent):
 
         Returns:
             Result[TaskResult] containing task result or error
+
         """
         # Validate agent is initialized
         if not self._is_initialized:
-            return Result.failure(AgentResultError(
-                "Agent not initialized",
-                agent_id=self.id,
-                task_id=task.id
-            ))
+            return Result.failure(
+                AgentResultError("Agent not initialized", agent_id=self.id, task_id=task.id)
+            )
 
         self.current_task = task
         self.status = "working"
@@ -187,7 +180,7 @@ class SubAgent(Agent):
                 task_id=str(task.id),
                 task_name=task.name,
             )
-            
+
             # Log task start with enhanced monitoring
             await log_agent_activity(
                 agent_id=self.id,
@@ -196,33 +189,33 @@ class SubAgent(Agent):
                 message=f"Starting task: {task.name}",
                 task_id=str(task.id),
                 task_name=task.name,
-                task_type=task.type if hasattr(task, 'type') else 'unknown',
-                agent_role=self.role.value
+                task_type=task.type if hasattr(task, "type") else "unknown",
+                agent_role=self.role.value,
             )
-            
+
             # Update progress: Task started
             await log_progress_update(
                 agent_id=self.id,
                 operation="task_execution",
                 progress_percentage=0.0,
                 task_id=str(task.id),
-                phase="initialization"
+                phase="initialization",
             )
-            
+
             # Validate dependencies if context provides completed tasks
-            if hasattr(context, 'completed_tasks') and task.dependencies:
+            if hasattr(context, "completed_tasks") and task.dependencies:
                 await log_progress_update(
                     agent_id=self.id,
                     operation="dependency_validation",
                     progress_percentage=10.0,
                     task_id=str(task.id),
-                    phase="dependency_check"
+                    phase="dependency_check",
                 )
-                
-                completed = getattr(context, 'completed_tasks', set())
+
+                completed = getattr(context, "completed_tasks", set())
                 if not task.is_ready(completed):
                     unsatisfied = [str(d) for d in task.dependencies if d not in completed]
-                    
+
                     # Log dependency failure
                     await log_agent_activity(
                         agent_id=self.id,
@@ -230,15 +223,17 @@ class SubAgent(Agent):
                         level=LogLevel.ERROR,
                         message=f"Task dependencies not satisfied: {len(unsatisfied)} unsatisfied",
                         task_id=str(task.id),
-                        unsatisfied_dependencies=unsatisfied
+                        unsatisfied_dependencies=unsatisfied,
                     )
-                    
-                    return Result.failure(DependencyError(
-                        f"Task '{task.name}' cannot execute - {len(unsatisfied)} dependencies not satisfied: {unsatisfied}",
-                        agent_id=self.id,
-                        task_id=task.id,
-                        details={"unsatisfied_dependencies": unsatisfied}
-                    ))
+
+                    return Result.failure(
+                        DependencyError(
+                            f"Task '{task.name}' cannot execute - {len(unsatisfied)} dependencies not satisfied: {unsatisfied}",
+                            agent_id=self.id,
+                            task_id=task.id,
+                            details={"unsatisfied_dependencies": unsatisfied},
+                        )
+                    )
 
             # Update progress: Dependencies validated
             await log_progress_update(
@@ -246,18 +241,20 @@ class SubAgent(Agent):
                 operation="task_execution",
                 progress_percentage=20.0,
                 task_id=str(task.id),
-                phase="execution_starting"
+                phase="execution_starting",
             )
 
             # Execute the specific implementation
             artifacts_result = await self._execute_specific_task(task, context)
-            
+
             if artifacts_result.is_failure():
                 task_result.success = False
                 task_result.add_error(str(artifacts_result.get_error()))
                 task_result.end_time = datetime.now(timezone.utc)
-                task_result.execution_time = (task_result.end_time - task_result.start_time).total_seconds()
-                
+                task_result.execution_time = (
+                    task_result.end_time - task_result.start_time
+                ).total_seconds()
+
                 # Log task failure
                 await log_agent_activity(
                     agent_id=self.id,
@@ -268,11 +265,11 @@ class SubAgent(Agent):
                     task_name=task.name,
                     error=str(artifacts_result.get_error()),
                     execution_time=task_result.execution_time,
-                    agent_role=self.role.value
+                    agent_role=self.role.value,
                 )
-                
+
                 return Result.failure(artifacts_result.get_error())
-            
+
             artifacts = artifacts_result.unwrap()
 
             # Update progress: Artifacts processing
@@ -282,7 +279,7 @@ class SubAgent(Agent):
                 progress_percentage=80.0,
                 task_id=str(task.id),
                 phase="storing_artifacts",
-                artifacts_count=len(artifacts)
+                artifacts_count=len(artifacts),
             )
 
             # Store artifacts using artifact manager if available
@@ -291,23 +288,31 @@ class SubAgent(Agent):
                     try:
                         # Store artifact in management system
                         stored = await context.artifact_manager.store_artifact(artifact)
-                        task_result.add_artifact(stored.id, is_primary=(len(task_result.artifacts) == 0))
+                        task_result.add_artifact(
+                            stored.id, is_primary=(len(task_result.artifacts) == 0)
+                        )
                         self.produced_artifacts.append(stored.id)
                     except Exception as e:
                         logger.error(
                             "Failed to store artifact", artifact_name=artifact.name, error=str(e)
                         )
-                        task_result.add_warning(f"Failed to store artifact {artifact.name}: {str(e)}")
+                        task_result.add_warning(
+                            f"Failed to store artifact {artifact.name}: {str(e)}"
+                        )
             else:
                 # Fallback: just track artifact IDs
                 for artifact in artifacts:
-                    task_result.add_artifact(artifact.id, is_primary=(len(task_result.artifacts) == 0))
+                    task_result.add_artifact(
+                        artifact.id, is_primary=(len(task_result.artifacts) == 0)
+                    )
                     self.produced_artifacts.append(artifact.id)
 
             # Record successful completion
             self.completed_tasks.append(task.id)
             task_result.end_time = datetime.now(timezone.utc)
-            task_result.execution_time = (task_result.end_time - task_result.start_time).total_seconds()
+            task_result.execution_time = (
+                task_result.end_time - task_result.start_time
+            ).total_seconds()
 
             # Update progress: Task completed
             await log_progress_update(
@@ -316,7 +321,7 @@ class SubAgent(Agent):
                 progress_percentage=100.0,
                 task_id=str(task.id),
                 phase="completed",
-                artifacts_produced=len(artifacts)
+                artifacts_produced=len(artifacts),
             )
 
             logger.info(
@@ -339,7 +344,7 @@ class SubAgent(Agent):
                 execution_time=task_result.execution_time,
                 artifacts_produced=len(artifacts),
                 agent_role=self.role.value,
-                task_type=task.type if hasattr(task, 'type') else 'unknown'
+                task_type=task.type if hasattr(task, "type") else "unknown",
             )
 
             return Result.success(task_result)
@@ -356,7 +361,9 @@ class SubAgent(Agent):
             task_result.success = False
             task_result.add_error(str(e))
             task_result.end_time = datetime.now(timezone.utc)
-            task_result.execution_time = (task_result.end_time - task_result.start_time).total_seconds()
+            task_result.execution_time = (
+                task_result.end_time - task_result.start_time
+            ).total_seconds()
 
             # Log exception with enhanced monitoring
             await log_agent_activity(
@@ -369,14 +376,14 @@ class SubAgent(Agent):
                 error=str(e),
                 error_type=type(e).__name__,
                 execution_time=task_result.execution_time,
-                agent_role=self.role.value
+                agent_role=self.role.value,
             )
 
-            return Result.failure(AgentResultError(
-                f"Task execution failed: {str(e)}",
-                agent_id=self.id,
-                task_id=task.id
-            ))
+            return Result.failure(
+                AgentResultError(
+                    f"Task execution failed: {str(e)}", agent_id=self.id, task_id=task.id
+                )
+            )
 
         finally:
             self.current_task = None
@@ -389,7 +396,7 @@ class SubAgent(Agent):
         name: str,
         task: Task,
         context: TaskContext,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> Artifact:
         """Create an artifact with proper metadata.
 
@@ -403,17 +410,18 @@ class SubAgent(Agent):
 
         Returns:
             Created artifact
+
         """
         # Use clean filename
         artifact_name = name
-        
+
         # Ensure proper extension
         extension = self._get_file_extension(artifact_type, metadata)
         if extension and not artifact_name.endswith(extension):
             artifact_name += extension
-        
+
         # Store metadata separately
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
         # Create artifact
         artifact = Artifact(
@@ -447,7 +455,7 @@ class SubAgent(Agent):
         context: TaskContext,
         task: Task,
         artifact_type: ArtifactType = ArtifactType.SOURCE_CODE,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> Artifact:
         """Write a file directly to the project workspace.
 
@@ -461,6 +469,7 @@ class SubAgent(Agent):
 
         Returns:
             Created artifact
+
         """
         # Get workspace path from context
         workspace_path = Path(context.shared_memory.get("workspace_path", "."))
@@ -525,6 +534,7 @@ class SubAgent(Agent):
 
         Returns:
             File content or None if not found
+
         """
         workspace_path = Path(context.shared_memory.get("workspace_path", "."))
         file_path = workspace_path / filename
@@ -548,6 +558,7 @@ class SubAgent(Agent):
 
         Returns:
             Updated artifact or None if failed
+
         """
         if not context.artifact_manager:
             logger.warning("No artifact manager available for update")
@@ -571,6 +582,7 @@ class SubAgent(Agent):
             primary: Primary artifact
             dependency: Dependency artifact
             context: Task context
+
         """
         if not context.artifact_manager:
             return
@@ -597,7 +609,7 @@ class SubAgent(Agent):
                 error=str(e),
             )
 
-    async def _get_task_artifacts(self, task_id: UUID, context: TaskContext) -> List[Artifact]:
+    async def _get_task_artifacts(self, task_id: UUID, context: TaskContext) -> list[Artifact]:
         """Get all artifacts for a task.
 
         Args:
@@ -606,6 +618,7 @@ class SubAgent(Agent):
 
         Returns:
             List of artifacts
+
         """
         if not context.artifact_manager:
             return []
@@ -617,7 +630,7 @@ class SubAgent(Agent):
             return []
 
     def _get_file_extension(
-        self, artifact_type: ArtifactType, metadata: Optional[Dict[str, Any]] = None
+        self, artifact_type: ArtifactType, metadata: Optional[dict[str, Any]] = None
     ) -> str:
         """Get appropriate file extension for artifact type.
 
@@ -627,6 +640,7 @@ class SubAgent(Agent):
 
         Returns:
             File extension with dot (e.g., ".py")
+
         """
         language = metadata.get("language") if metadata else None
 
@@ -658,7 +672,7 @@ class SubAgent(Agent):
         else:
             return ".txt"
 
-    async def collaborate(self, other_agent: Agent, message: Dict[str, Any]) -> Dict[str, Any]:
+    async def collaborate(self, other_agent: Agent, message: dict[str, Any]) -> dict[str, Any]:
         """Handle collaboration messages from other agents.
 
         Args:
@@ -667,6 +681,7 @@ class SubAgent(Agent):
 
         Returns:
             Response message
+
         """
         # Convert dict to Message object if needed
         if isinstance(message, dict):
@@ -686,21 +701,22 @@ class SubAgent(Agent):
 
     def _get_workspace_index(self, workspace_dir: Path) -> WorkspaceIndex:
         """Get or create workspace index for the given directory.
-        
+
         Args:
             workspace_dir: Directory to index
-            
+
         Returns:
             WorkspaceIndex instance
+
         """
         if self._workspace_index is None or self._workspace_index.root_path != workspace_dir:
             self._workspace_index = WorkspaceIndex(
                 root_path=workspace_dir,
-                ignore_patterns={'.git', '__pycache__', '*.pyc', '*.pyo', '.DS_Store'}
+                ignore_patterns={".git", "__pycache__", "*.pyc", "*.pyo", ".DS_Store"},
             )
             self._workspace_index.build_index()
         return self._workspace_index
-    
+
     async def _process_messages(self) -> None:
         """Process incoming messages asynchronously."""
         while True:
@@ -721,6 +737,7 @@ class SubAgent(Agent):
 
         Args:
             message: Message to handle
+
         """
         logger.debug(
             "Handling message",
@@ -740,7 +757,7 @@ class SubAgent(Agent):
         temperature: float = 0.7,
         system_prompt: Optional[str] = None,
         task_type: str = "code",
-        context_files: Optional[List[Path]] = None,
+        context_files: Optional[list[Path]] = None,
     ) -> Result[str]:
         """Query Claude with a prompt using CLI.
 
@@ -755,13 +772,11 @@ class SubAgent(Agent):
 
         Returns:
             Result[str] containing Claude's response or error
+
         """
         if not self.claude_code_client:
-            return Result.failure(CLIError(
-                "Claude Code client not initialized",
-                agent_id=self.id
-            ))
-            
+            return Result.failure(CLIError("Claude Code client not initialized", agent_id=self.id))
+
         # Use CLI for code generation
         if system_prompt:
             prompt = f"{system_prompt}\n\n{prompt}"
@@ -775,10 +790,10 @@ class SubAgent(Agent):
 
         # Get workspace directory from context
         workspace_dir = None
-        if self.context and hasattr(self.context, 'project_root'):
+        if self.context and hasattr(self.context, "project_root"):
             workspace_dir = self.context.project_root / "workspace"
             workspace_dir.mkdir(parents=True, exist_ok=True)
-        
+
         try:
             response = await self.claude_code_client.create_message_for_code(
                 messages=[{"role": "user", "content": prompt}],
@@ -788,32 +803,33 @@ class SubAgent(Agent):
                 context_files=context_files,
                 workspace_dir=workspace_dir,
             )
-            
-            # Claude Code now returns plain text directly
-            cli_response = response if isinstance(response, str) else str(response)
+
+            # Extract response content from Claude Code JSON response
+            if isinstance(response, dict):
+                # Claude Code returns JSON with format: {"type": "result", "result": "...", ...}
+                cli_response = response.get("result", str(response))
+            else:
+                cli_response = response if isinstance(response, str) else str(response)
+
             self._last_cli_response = cli_response
 
             if not cli_response.strip():
                 logger.error("Empty CLI response", response=response)
-                return Result.failure(CLIResponseError(
-                    "Received empty response from Claude Code",
-                    agent_id=self.id,
-                    details={"response": response}
-                ))
+                return Result.failure(
+                    CLIResponseError(
+                        "Received empty response from Claude Code",
+                        agent_id=self.id,
+                        details={"response": response},
+                    )
+                )
 
             return Result.success(cli_response)
-            
+
         except Exception as e:
             logger.error(
-                "Failed to query Claude Code",
-                agent_id=str(self.id),
-                error=str(e),
-                exc_info=True
+                "Failed to query Claude Code", agent_id=str(self.id), error=str(e), exc_info=True
             )
-            return Result.failure(CLIError(
-                f"Claude Code query failed: {str(e)}",
-                agent_id=self.id
-            ))
+            return Result.failure(CLIError(f"Claude Code query failed: {str(e)}", agent_id=self.id))
 
     async def shutdown(self) -> None:
         """Gracefully shutdown the agent."""
@@ -846,7 +862,9 @@ class CodeGeneratorAgent(SubAgent):
         """Initialize code generator agent."""
         super().__init__(agent_id, AgentRole.CORE_LOGIC)
 
-    async def _execute_specific_task(self, task: Task, context: TaskContext) -> Result[List[Artifact]]:
+    async def _execute_specific_task(
+        self, task: Task, context: TaskContext
+    ) -> Result[list[Artifact]]:
         """Generate code based on task specification.
 
         Args:
@@ -855,6 +873,7 @@ class CodeGeneratorAgent(SubAgent):
 
         Returns:
             Result[List[Artifact]] containing code artifacts or error
+
         """
         # Get the code generation prompt
         prompt_template = get_agent_prompt(self.role, "main")
@@ -929,48 +948,49 @@ Do not generate any summary or explanation. Only create or modify the files as r
             task_type="code",
             context_files=context_files,
         )
-        
+
         if response_result.is_failure():
             return Result.failure(response_result.get_error())
-            
+
         response = response_result.unwrap()
 
         # When using CLI, Claude writes files directly to workspace
         # The response should be a summary of what was created
         logger.info(f"Claude Code response: {response[:500]}...")
-        
+
         # Get list of files in workspace after Claude ran
         created_files = []
         # When using the CLI, we expect Claude to write files directly.
         # The response should be a simple confirmation.
         # We will then scan the workspace to find the created files.
-        
+
         # Claude Code should write files directly to workspace
         # The response is a plain text summary of what was created
 
         # Use WorkspaceIndex for efficient file scanning
         workspace_index = WorkspaceIndex(
-            root_path=workspace_dir,
-            ignore_patterns={'.git', '__pycache__', '*.pyc', '*.pyo'}
+            root_path=workspace_dir, ignore_patterns={".git", "__pycache__", "*.pyc", "*.pyo"}
         )
         workspace_index.build_index()
-        
+
         # Get all files created in the workspace
         all_files = workspace_index.get_all_files()
         for file_info in all_files:
             created_files.append(file_info.relative_path)
-        
+
         logger.info(f"Files found in workspace after CLI run: {created_files}")
-        
+
         # If no files were created, there was an error
         if not created_files:
             logger.error(f"No files created by Claude Code. Response: {response}")
-            return Result.failure(WorkspaceError(
-                "Claude Code did not create any files in the workspace",
-                agent_id=self.id,
-                task_id=task.id,
-                details={"response": response}
-            ))
+            return Result.failure(
+                WorkspaceError(
+                    "Claude Code did not create any files in the workspace",
+                    agent_id=self.id,
+                    task_id=task.id,
+                    details={"response": response},
+                )
+            )
 
         # Create artifacts for each file created
         artifacts = []
@@ -980,7 +1000,7 @@ Do not generate any summary or explanation. Only create or modify the files as r
             if file_path.exists():
                 try:
                     # Read the content that Claude wrote
-                    content = file_path.read_text(encoding='utf-8')
+                    content = file_path.read_text(encoding="utf-8")
                 except UnicodeDecodeError:
                     logger.warning(f"Could not read file with utf-8 encoding, skipping: {filename}")
                     continue  # Skip this file and move to the next one
@@ -989,32 +1009,32 @@ Do not generate any summary or explanation. Only create or modify the files as r
                     continue
 
                 # Determine artifact type based on file extension
-                if filename.endswith(('.md', '.txt', '.rst')):
+                if filename.endswith((".md", ".txt", ".rst")):
                     artifact_type = ArtifactType.DOCUMENTATION
-                elif filename.endswith(('.json', '.yaml', '.yml', '.toml', '.ini', '.cfg')):
+                elif filename.endswith((".json", ".yaml", ".yml", ".toml", ".ini", ".cfg")):
                     artifact_type = ArtifactType.CONFIGURATION
-                elif filename.endswith(('.gitignore', 'requirements.txt', 'Makefile')):
+                elif filename.endswith((".gitignore", "requirements.txt", "Makefile")):
                     artifact_type = ArtifactType.CONFIGURATION
                 else:
                     artifact_type = ArtifactType.SOURCE_CODE
-                
+
                 # Determine language based on extension
                 ext_to_lang = {
-                    '.py': 'python',
-                    '.js': 'javascript',
-                    '.ts': 'typescript',
-                    '.java': 'java',
-                    '.go': 'go',
-                    '.rs': 'rust',
-                    '.cpp': 'cpp',
-                    '.c': 'c',
-                    '.md': 'markdown',
-                    '.json': 'json',
-                    '.yaml': 'yaml',
-                    '.yml': 'yaml',
+                    ".py": "python",
+                    ".js": "javascript",
+                    ".ts": "typescript",
+                    ".java": "java",
+                    ".go": "go",
+                    ".rs": "rust",
+                    ".cpp": "cpp",
+                    ".c": "c",
+                    ".md": "markdown",
+                    ".json": "json",
+                    ".yaml": "yaml",
+                    ".yml": "yaml",
                 }
-                language = ext_to_lang.get(Path(filename).suffix, 'text')
-                
+                language = ext_to_lang.get(Path(filename).suffix, "text")
+
                 # Create artifact record
                 artifact = await self._create_artifact(
                     content=content,
@@ -1053,7 +1073,9 @@ class TestWriterAgent(SubAgent):
         """Initialize test writer agent."""
         super().__init__(agent_id, AgentRole.TESTING)
 
-    async def _execute_specific_task(self, task: Task, context: TaskContext) -> Result[List[Artifact]]:
+    async def _execute_specific_task(
+        self, task: Task, context: TaskContext
+    ) -> Result[list[Artifact]]:
         """Generate tests for code.
 
         Args:
@@ -1062,6 +1084,7 @@ class TestWriterAgent(SubAgent):
 
         Returns:
             List of test artifacts
+
         """
         # Get the test generation prompt
         prompt_template = get_agent_prompt(self.role, "main")
@@ -1101,11 +1124,11 @@ class TestWriterAgent(SubAgent):
                 # Use WorkspaceIndex to find Python files
                 workspace_index = WorkspaceIndex(
                     root_path=workspace_dir,
-                    ignore_patterns={'__pycache__', '*.pyc', '*.pyo', '.git'}
+                    ignore_patterns={"__pycache__", "*.pyc", "*.pyo", ".git"},
                 )
                 workspace_index.build_index()
-                
-                python_files = workspace_index.get_files_by_extension('.py')
+
+                python_files = workspace_index.get_files_by_extension(".py")
                 logger.info(f"Python files found: {[f.relative_path for f in python_files]}")
 
                 for file_info in python_files:
@@ -1126,12 +1149,17 @@ class TestWriterAgent(SubAgent):
                     workspace_index = self._get_workspace_index(workspace_dir)
                     all_files = workspace_index.get_all_files()
                     logger.error(f"All files in workspace: {[f.name for f in all_files]}")
-                return Result.failure(WorkspaceError(
-                    "No Python file found in workspace to test",
-                    agent_id=self.id,
-                    task_id=task.id,
-                    details={"workspace_dir": str(workspace_dir), "exists": workspace_dir.exists()}
-                ))
+                return Result.failure(
+                    WorkspaceError(
+                        "No Python file found in workspace to test",
+                        agent_id=self.id,
+                        task_id=task.id,
+                        details={
+                            "workspace_dir": str(workspace_dir),
+                            "exists": workspace_dir.exists(),
+                        },
+                    )
+                )
 
             # Read the code from workspace
             try:
@@ -1139,26 +1167,30 @@ class TestWriterAgent(SubAgent):
                 if file_path.exists():
                     code_to_test = file_path.read_text()
                 else:
-                    return Result.failure(WorkspaceError(
-                        f"File {code_file} not found in workspace",
-                        agent_id=self.id,
-                        task_id=task.id,
-                        details={"file": code_file, "workspace_dir": str(workspace_dir)}
-                    ))
+                    return Result.failure(
+                        WorkspaceError(
+                            f"File {code_file} not found in workspace",
+                            agent_id=self.id,
+                            task_id=task.id,
+                            details={"file": code_file, "workspace_dir": str(workspace_dir)},
+                        )
+                    )
             except Exception as e:
                 logger.error(f"Could not read {code_file}: {e}")
-                return Result.failure(WorkspaceError(
-                    f"Could not read file {code_file} from workspace: {e}",
-                    agent_id=self.id,
-                    task_id=task.id,
-                    details={"file": code_file, "error": str(e)}
-                ))
+                return Result.failure(
+                    WorkspaceError(
+                        f"Could not read file {code_file} from workspace: {e}",
+                        agent_id=self.id,
+                        task_id=task.id,
+                        details={"file": code_file, "error": str(e)},
+                    )
+                )
 
         # Prepare prompt variables
         task_spec = task.metadata.get("specification", {})
-        
+
         # Create a natural language representation of the test task
-        test_task_description = f"Task: Write tests for the following code.\n"
+        test_task_description = "Task: Write tests for the following code.\n"
         test_task_description += f"Code to test:\n```python\n{code_to_test}\n```\n"
         if "test_framework" in task_spec:
             test_task_description += f"Test Framework: {task_spec['test_framework']}\n"
@@ -1195,7 +1227,7 @@ Please create test files directly in this workspace directory. Test files should
             workspace_index = self._get_workspace_index(workspace_dir)
             all_files = workspace_index.get_all_files()
             context_files = [workspace_dir / f.relative_path for f in all_files]
-        
+
         response_result = await self._query_claude(
             prompt,
             model=ClaudeModel.SONNET,
@@ -1203,30 +1235,33 @@ Please create test files directly in this workspace directory. Test files should
             task_type="test",
             context_files=context_files,
         )
-        
+
         if response_result.is_failure():
             return Result.failure(response_result.get_error())
-            
+
         response = response_result.unwrap()
 
         # When using CLI, Claude writes test files directly
         files_created = []
         # Scan workspace for test files
         import os
+
         for file in os.listdir(workspace_dir):
             if file.startswith("test_") and file.endswith(".py"):
                 files_created.append(file)
-        
+
         logger.info(f"Test files found in workspace: {files_created}")
-        
+
         if not files_created:
             logger.error(f"No test files created by Claude Code. Response: {response}")
-            return Result.failure(WorkspaceError(
-                "Claude Code did not create any test files in the workspace",
-                agent_id=self.id,
-                task_id=task.id,
-                details={"response": response}
-            ))
+            return Result.failure(
+                WorkspaceError(
+                    "Claude Code did not create any test files in the workspace",
+                    agent_id=self.id,
+                    task_id=task.id,
+                    details={"response": response},
+                )
+            )
 
         # Create artifacts for test files
         artifacts = []
@@ -1237,7 +1272,7 @@ Please create test files directly in this workspace directory. Test files should
 
                 # Get the tested artifact ID from task metadata
                 tested_artifact_id = task.metadata.get("code_artifact_id")
-                
+
                 artifact = await self._create_artifact(
                     content=content,
                     artifact_type=ArtifactType.TEST_CODE,
@@ -1256,17 +1291,19 @@ Please create test files directly in this workspace directory. Test files should
                     },
                 )
                 artifacts.append(artifact)
-                
+
                 # Link test artifact to code artifact if possible
                 if tested_artifact_id and context.link_test_artifacts and context.artifact_manager:
                     try:
-                        code_artifact = await context.artifact_manager.get_artifact(UUID(tested_artifact_id))
+                        code_artifact = await context.artifact_manager.get_artifact(
+                            UUID(tested_artifact_id)
+                        )
                         if code_artifact:
                             await self._link_artifacts(artifact, code_artifact, context)
                             logger.info(
                                 "Linked test artifact to code artifact",
                                 test_id=str(artifact.id),
-                                code_id=tested_artifact_id
+                                code_id=tested_artifact_id,
                             )
                     except Exception as e:
                         logger.warning(f"Failed to link test artifact to code: {e}")
@@ -1293,7 +1330,9 @@ class DocumentationAgent(SubAgent):
         """Initialize documentation agent."""
         super().__init__(agent_id, AgentRole.DOCUMENTATION)
 
-    async def _execute_specific_task(self, task: Task, context: TaskContext) -> Result[List[Artifact]]:
+    async def _execute_specific_task(
+        self, task: Task, context: TaskContext
+    ) -> Result[list[Artifact]]:
         """Generate documentation for code.
 
         Args:
@@ -1302,6 +1341,7 @@ class DocumentationAgent(SubAgent):
 
         Returns:
             List of documentation artifacts
+
         """
         # Get the documentation prompt
         prompt_template = get_agent_prompt(self.role, "main")
@@ -1313,7 +1353,7 @@ class DocumentationAgent(SubAgent):
         task_spec = task.metadata.get("specification", {})
 
         # Create a natural language representation of the documentation task
-        doc_task_description = f"Task: Create documentation for the following code.\n"
+        doc_task_description = "Task: Create documentation for the following code.\n"
         doc_task_description += f"Code to document:\n```python\n{code_to_document}\n```\n"
         if "doc_type" in task_spec:
             doc_task_description += f"Documentation Type: {task_spec['doc_type']}\n"
@@ -1353,7 +1393,7 @@ Please create documentation files directly in this workspace directory (e.g., RE
             workspace_index = self._get_workspace_index(workspace_dir)
             all_files = workspace_index.get_all_files()
             context_files = [workspace_dir / f.relative_path for f in all_files]
-        
+
         response_result = await self._query_claude(
             prompt,
             model=ClaudeModel.SONNET,
@@ -1361,10 +1401,10 @@ Please create documentation files directly in this workspace directory (e.g., RE
             task_type="documentation",
             context_files=context_files,
         )
-        
+
         if response_result.is_failure():
             return Result.failure(response_result.get_error())
-            
+
         response = response_result.unwrap()
 
         # Claude has written documentation files directly
@@ -1393,7 +1433,9 @@ class RefactorAgent(SubAgent):
         """Initialize refactor agent."""
         super().__init__(agent_id, AgentRole.OPTIMIZATION)
 
-    async def _execute_specific_task(self, task: Task, context: TaskContext) -> Result[List[Artifact]]:
+    async def _execute_specific_task(
+        self, task: Task, context: TaskContext
+    ) -> Result[list[Artifact]]:
         """Refactor and optimize code.
 
         Args:
@@ -1402,6 +1444,7 @@ class RefactorAgent(SubAgent):
 
         Returns:
             List of refactored code artifacts
+
         """
         # Get the refactoring prompt
         prompt_template = get_agent_prompt(self.role, "main")
@@ -1413,10 +1456,12 @@ class RefactorAgent(SubAgent):
         task_spec = task.metadata.get("specification", {})
 
         # Create a natural language representation of the refactoring task
-        refactor_task_description = f"Task: Refactor the following code.\n"
+        refactor_task_description = "Task: Refactor the following code.\n"
         refactor_task_description += f"Code to refactor:\n```python\n{code_to_refactor}\n```\n"
         if "refactoring_goals" in task_spec:
-            refactor_task_description += f"Refactoring Goals: {', '.join(task_spec['refactoring_goals'])}\n"
+            refactor_task_description += (
+                f"Refactoring Goals: {', '.join(task_spec['refactoring_goals'])}\n"
+            )
         if "constraints" in task_spec:
             refactor_task_description += f"Constraints: {', '.join(task_spec['constraints'])}\n"
 
@@ -1452,7 +1497,7 @@ class RefactorAgent(SubAgent):
             workspace_index = self._get_workspace_index(workspace_dir)
             all_files = workspace_index.get_all_files()
             context_files = [workspace_dir / f.relative_path for f in all_files]
-        
+
         response_result = await self._query_claude(
             prompt,
             model=ClaudeModel.OPUS,
@@ -1460,10 +1505,10 @@ class RefactorAgent(SubAgent):
             task_type="code",
             context_files=context_files,
         )
-        
+
         if response_result.is_failure():
             return Result.failure(response_result.get_error())
-            
+
         response = response_result.unwrap()
 
         # Claude has refactored code directly in workspace
@@ -1492,7 +1537,9 @@ class DebugAgent(SubAgent):
         """Initialize debug agent."""
         super().__init__(agent_id, AgentRole.VERIFICATION)
 
-    async def _execute_specific_task(self, task: Task, context: TaskContext) -> Result[List[Artifact]]:
+    async def _execute_specific_task(
+        self, task: Task, context: TaskContext
+    ) -> Result[list[Artifact]]:
         """Debug and fix code issues.
 
         Args:
@@ -1501,6 +1548,7 @@ class DebugAgent(SubAgent):
 
         Returns:
             List of fixed code artifacts
+
         """
         # Get the debug analysis prompt
         prompt_template = get_agent_prompt(self.role, "main")
@@ -1527,10 +1575,10 @@ class DebugAgent(SubAgent):
             temperature=0.2,  # Lower temperature for precise fixes
             task_type="code",
         )
-        
+
         if response_result.is_failure():
             return Result.failure(response_result.get_error())
-            
+
         response = response_result.unwrap()
 
         # Parse response
@@ -1538,12 +1586,14 @@ class DebugAgent(SubAgent):
             # Check if response is empty
             if not response or not response.strip():
                 logger.error("Empty response from Claude", response=response)
-                return Result.failure(CLIResponseError(
-                    "Received empty response from Claude",
-                    agent_id=self.id,
-                    task_id=task.id,
-                    details={"response": response}
-                ))
+                return Result.failure(
+                    CLIResponseError(
+                        "Received empty response from Claude",
+                        agent_id=self.id,
+                        task_id=task.id,
+                        details={"response": response},
+                    )
+                )
 
             result = json.loads(response)
         except json.JSONDecodeError as e:
@@ -1571,29 +1621,35 @@ class DebugAgent(SubAgent):
                         result = json.loads(fixed_json)
                         logger.warning("Fixed malformed JSON from Claude")
                     except json.JSONDecodeError:
-                        return Result.failure(CLIResponseError(
-                            f"Failed to parse Claude response as JSON. Response: {response[:500]}...",
-                            agent_id=self.id,
-                            task_id=task.id,
-                            details={"response": response}
-                        ))
+                        return Result.failure(
+                            CLIResponseError(
+                                f"Failed to parse Claude response as JSON. Response: {response[:500]}...",
+                                agent_id=self.id,
+                                task_id=task.id,
+                                details={"response": response},
+                            )
+                        )
             else:
-                return Result.failure(CLIResponseError(
-                    f"Failed to parse Claude response as JSON. Response: {response[:500]}...",
-                    agent_id=self.id,
-                    task_id=task.id,
-                    details={"response": response}
-                ))
+                return Result.failure(
+                    CLIResponseError(
+                        f"Failed to parse Claude response as JSON. Response: {response[:500]}...",
+                        agent_id=self.id,
+                        task_id=task.id,
+                        details={"response": response},
+                    )
+                )
 
         # Get the recommended solution
         solutions = result.get("solutions", [])
         if not solutions:
-            return Result.failure(AgentResultError(
-                "No solutions provided",
-                agent_id=self.id,
-                task_id=task.id,
-                details={"result": result}
-            ))
+            return Result.failure(
+                AgentResultError(
+                    "No solutions provided",
+                    agent_id=self.id,
+                    task_id=task.id,
+                    details={"result": result},
+                )
+            )
 
         recommended_idx = result.get("recommended_solution", 0)
         solution = solutions[recommended_idx]

@@ -8,10 +8,10 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Optional
 from uuid import UUID
 
-from src.core.interfaces import Task, TaskContext
+from src.core.interfaces import Task
 from src.utils.app_logging import get_logger
 
 logger = get_logger(__name__)
@@ -19,6 +19,7 @@ logger = get_logger(__name__)
 
 class ErrorType(Enum):
     """Types of errors that can occur."""
+
     API_RATE_LIMIT = "api_rate_limit"
     API_TIMEOUT = "api_timeout"
     API_SERVER_ERROR = "api_server_error"
@@ -38,6 +39,7 @@ class ErrorType(Enum):
 
 class RetryStrategy(Enum):
     """Strategies for retrying failed tasks."""
+
     IMMEDIATE = "immediate"
     EXPONENTIAL_BACKOFF = "exponential_backoff"
     MODIFY_PROMPT = "modify_prompt"
@@ -51,6 +53,7 @@ class RetryStrategy(Enum):
 @dataclass
 class ErrorDiagnosis:
     """Detailed diagnosis of an error."""
+
     error_type: ErrorType
     error_message: str
     is_retryable: bool
@@ -58,9 +61,9 @@ class ErrorDiagnosis:
     suggested_fix: Optional[str] = None
     retry_delay: float = 2.0
     confidence: float = 0.8
-    patterns_matched: List[str] = None
-    context: Dict[str, Any] = None
-    
+    patterns_matched: list[str] = None
+    context: dict[str, Any] = None
+
     def __post_init__(self):
         if self.patterns_matched is None:
             self.patterns_matched = []
@@ -71,6 +74,7 @@ class ErrorDiagnosis:
 @dataclass
 class TaskFailure:
     """Record of a task failure."""
+
     task_id: UUID
     task_name: str
     attempt: int
@@ -84,13 +88,13 @@ class TaskFailure:
 
 class FailureAnalyzer:
     """Analyzes failures and determines retry strategies."""
-    
+
     def __init__(self):
         """Initialize the failure analyzer."""
-        self.failure_history: Dict[UUID, List[TaskFailure]] = {}
+        self.failure_history: dict[UUID, list[TaskFailure]] = {}
         self.error_patterns = self._init_error_patterns()
-        
-    def _init_error_patterns(self) -> Dict[ErrorType, List[re.Pattern]]:
+
+    def _init_error_patterns(self) -> dict[ErrorType, list[re.Pattern]]:
         """Initialize regex patterns for error detection."""
         return {
             ErrorType.API_RATE_LIMIT: [
@@ -134,27 +138,25 @@ class FailureAnalyzer:
                 re.compile(r"blocked.*by", re.IGNORECASE),
             ],
         }
-    
+
     async def analyze_error(
-        self, 
-        task: Task, 
-        error: Exception, 
-        context: Dict[str, Any]
+        self, task: Task, error: Exception, context: dict[str, Any]
     ) -> ErrorDiagnosis:
         """Analyze an error and determine root cause.
-        
+
         Args:
             task: The failed task
             error: The exception that occurred
             context: Additional context (e.g., CLI response, attempt number)
-            
+
         Returns:
             Detailed error diagnosis
+
         """
         error_str = str(error)
         error_type = ErrorType.UNKNOWN
         matched_patterns = []
-        
+
         # Check for specific error patterns
         for err_type, patterns in self.error_patterns.items():
             for pattern in patterns:
@@ -164,27 +166,25 @@ class FailureAnalyzer:
                     break
             if error_type != ErrorType.UNKNOWN:
                 break
-        
+
         # Special handling for CLI response issues
         cli_response = context.get("cli_response", "")
         if cli_response and len(cli_response) == 15 and cli_response.isalnum():
             error_type = ErrorType.CLI_MALFORMED_RESPONSE
             matched_patterns.append("15-character CLI response")
-        
+
         # Determine retry strategy
         retry_strategy = await self.get_retry_strategy(error_type, task, context)
-        
+
         # Check if error is retryable
         is_retryable = self._is_error_retryable(error_type, context)
-        
+
         # Generate suggested fix
-        suggested_fix = await self._generate_fix_suggestion(
-            error_type, task, error_str, context
-        )
-        
+        suggested_fix = await self._generate_fix_suggestion(error_type, task, error_str, context)
+
         # Calculate retry delay
         retry_delay = self._calculate_retry_delay(error_type, context)
-        
+
         diagnosis = ErrorDiagnosis(
             error_type=error_type,
             error_message=error_str,
@@ -193,48 +193,46 @@ class FailureAnalyzer:
             suggested_fix=suggested_fix,
             retry_delay=retry_delay,
             patterns_matched=matched_patterns,
-            context=context
+            context=context,
         )
-        
+
         # Record failure
         self._record_failure(task, diagnosis, context)
-        
+
         logger.info(
             "Error analyzed",
             task_id=task.id,
             error_type=error_type.value,
             is_retryable=is_retryable,
-            retry_strategy=retry_strategy.value
+            retry_strategy=retry_strategy.value,
         )
-        
+
         return diagnosis
-    
+
     async def get_retry_strategy(
-        self, 
-        error_type: ErrorType,
-        task: Task,
-        context: Dict[str, Any]
+        self, error_type: ErrorType, task: Task, context: dict[str, Any]
     ) -> RetryStrategy:
         """Determine retry strategy based on error type.
-        
+
         Args:
             error_type: Type of error
             task: The failed task
             context: Additional context
-            
+
         Returns:
             Appropriate retry strategy
+
         """
         attempt = context.get("attempt", 1)
-        
+
         # API errors - use exponential backoff
         if error_type in [ErrorType.API_RATE_LIMIT, ErrorType.API_TIMEOUT]:
             return RetryStrategy.EXPONENTIAL_BACKOFF
-        
+
         # Server errors - wait and retry
         if error_type == ErrorType.API_SERVER_ERROR:
             return RetryStrategy.WAIT_AND_RETRY
-        
+
         # CLI response issues - modify prompt
         if error_type == ErrorType.CLI_MALFORMED_RESPONSE:
             if attempt == 1:
@@ -243,50 +241,47 @@ class FailureAnalyzer:
                 return RetryStrategy.SIMPLIFY_TASK
             else:
                 return RetryStrategy.SPLIT_TASK
-        
+
         # Compilation errors - skip retry unless it's a simple fix
         if error_type in [ErrorType.COMPILATION_ERROR, ErrorType.SYNTAX_ERROR]:
             # Check if it's a simple syntax error that might be fixed
             if "missing colon" in context.get("error_message", "").lower():
                 return RetryStrategy.MODIFY_PROMPT
             return RetryStrategy.SKIP
-        
+
         # Import errors - usually permanent
         if error_type == ErrorType.IMPORT_ERROR:
             return RetryStrategy.SKIP
-        
+
         # Test failures - might need timeout increase
         if error_type == ErrorType.TEST_FAILURE:
             if "timeout" in context.get("error_message", "").lower():
                 return RetryStrategy.INCREASE_TIMEOUT
             return RetryStrategy.MODIFY_PROMPT
-        
+
         # Dependency issues - wait for dependencies
         if error_type == ErrorType.DEPENDENCY_MISSING:
             return RetryStrategy.WAIT_AND_RETRY
-        
+
         # Default strategy
         if attempt < 3:
             return RetryStrategy.EXPONENTIAL_BACKOFF
         else:
             return RetryStrategy.SKIP
-    
-    async def generate_fix_prompt(
-        self, 
-        task: Task, 
-        diagnosis: ErrorDiagnosis
-    ) -> str:
+
+    async def generate_fix_prompt(self, task: Task, diagnosis: ErrorDiagnosis) -> str:
         """Generate improved prompt for retry attempt.
-        
+
         Args:
             task: The failed task
             diagnosis: Error diagnosis
-            
+
         Returns:
             Modified prompt for retry
+
         """
         original_prompt = task.description
-        
+
         if diagnosis.retry_strategy == RetryStrategy.MODIFY_PROMPT:
             if diagnosis.error_type == ErrorType.CLI_MALFORMED_RESPONSE:
                 # Add explicit JSON format request
@@ -300,7 +295,7 @@ IMPORTANT: Return your response in the following JSON format:
 }}
 
 Ensure the response is valid JSON that can be parsed."""
-            
+
             elif diagnosis.error_type == ErrorType.TEST_FAILURE:
                 # Add test-specific guidance
                 return f"""{original_prompt}
@@ -310,26 +305,30 @@ Additional requirements:
 - Add proper error handling for edge cases
 - Include type hints for all functions
 - Make sure all test assertions have descriptive messages"""
-            
+
             else:
                 # Generic improvement
                 return f"""{original_prompt}
 
 Previous attempt failed with: {diagnosis.error_message}
 Please ensure the code is complete, properly formatted, and handles edge cases."""
-        
+
         elif diagnosis.retry_strategy == RetryStrategy.SIMPLIFY_TASK:
             # Simplify the task
-            lines = original_prompt.strip().split('\n')
+            lines = original_prompt.strip().split("\n")
             if len(lines) > 5:
                 # Take only the core requirements
-                core_lines = [line for line in lines if any(
-                    keyword in line.lower() 
-                    for keyword in ['create', 'implement', 'build', 'write']
-                )][:3]
-                return '\n'.join(core_lines) + "\n\nFocus on the core functionality only."
+                core_lines = [
+                    line
+                    for line in lines
+                    if any(
+                        keyword in line.lower()
+                        for keyword in ["create", "implement", "build", "write"]
+                    )
+                ][:3]
+                return "\n".join(core_lines) + "\n\nFocus on the core functionality only."
             return original_prompt
-        
+
         elif diagnosis.retry_strategy == RetryStrategy.SPLIT_TASK:
             # Suggest splitting into subtasks
             return f"""The following task is complex. Please implement ONLY the first part:
@@ -337,18 +336,19 @@ Please ensure the code is complete, properly formatted, and handles edge cases."
 {original_prompt}
 
 Start with the basic structure and core functionality only."""
-        
+
         return original_prompt
-    
-    def _is_error_retryable(self, error_type: ErrorType, context: Dict[str, Any]) -> bool:
+
+    def _is_error_retryable(self, error_type: ErrorType, context: dict[str, Any]) -> bool:
         """Determine if an error is retryable.
-        
+
         Args:
             error_type: Type of error
             context: Additional context
-            
+
         Returns:
             True if error is retryable
+
         """
         # Permanent errors
         permanent_errors = {
@@ -356,14 +356,14 @@ Start with the basic structure and core functionality only."""
             ErrorType.COMPILATION_ERROR,
             ErrorType.SYNTAX_ERROR,
         }
-        
+
         # Check attempt count
         attempt = context.get("attempt", 1)
         max_attempts = context.get("max_attempts", 3)
-        
+
         if attempt >= max_attempts:
             return False
-        
+
         # Some errors are permanent
         if error_type in permanent_errors:
             # Unless we have a specific fix strategy
@@ -372,7 +372,7 @@ Start with the basic structure and core functionality only."""
                 if any(fixable in error_msg for fixable in ["missing colon", "indentation"]):
                     return True
             return False
-        
+
         # Transient errors are always retryable
         transient_errors = {
             ErrorType.API_RATE_LIMIT,
@@ -382,89 +382,79 @@ Start with the basic structure and core functionality only."""
             ErrorType.VERIFICATION_TIMEOUT,
             ErrorType.TRANSIENT,
         }
-        
+
         return error_type in transient_errors or error_type == ErrorType.UNKNOWN
-    
-    def _calculate_retry_delay(self, error_type: ErrorType, context: Dict[str, Any]) -> float:
+
+    def _calculate_retry_delay(self, error_type: ErrorType, context: dict[str, Any]) -> float:
         """Calculate delay before retry.
-        
+
         Args:
             error_type: Type of error
             context: Additional context
-            
+
         Returns:
             Delay in seconds
+
         """
         base_delay = context.get("base_delay", 2.0)
         attempt = context.get("attempt", 1)
         backoff_multiplier = context.get("backoff_multiplier", 2.0)
-        
+
         if error_type == ErrorType.API_RATE_LIMIT:
             # Check if we have rate limit info
             if "retry_after" in context:
                 return float(context["retry_after"])
             # Otherwise use exponential backoff
             return min(base_delay * (backoff_multiplier ** (attempt - 1)), 60.0)
-        
+
         elif error_type in [ErrorType.API_TIMEOUT, ErrorType.API_SERVER_ERROR]:
             # Exponential backoff with cap
             return min(base_delay * (backoff_multiplier ** (attempt - 1)), 30.0)
-        
+
         elif error_type == ErrorType.DEPENDENCY_MISSING:
             # Wait longer for dependencies
             return base_delay * 3
-        
+
         else:
             # Standard delay
             return base_delay
-    
+
     async def _generate_fix_suggestion(
-        self,
-        error_type: ErrorType,
-        task: Task,
-        error_message: str,
-        context: Dict[str, Any]
+        self, error_type: ErrorType, task: Task, error_message: str, context: dict[str, Any]
     ) -> Optional[str]:
         """Generate a suggestion for fixing the error.
-        
+
         Args:
             error_type: Type of error
             task: The failed task
             error_message: Error message
             context: Additional context
-            
+
         Returns:
             Suggestion for fixing the error
+
         """
         suggestions = {
-            ErrorType.CLI_MALFORMED_RESPONSE: 
-                "Claude CLI returned malformed response. Consider using API directly or simplifying the prompt.",
-            ErrorType.API_RATE_LIMIT:
-                "Hit API rate limit. Wait before retrying or reduce request frequency.",
-            ErrorType.IMPORT_ERROR:
-                f"Missing import in generated code. Ensure all dependencies are specified in the task.",
-            ErrorType.TEST_FAILURE:
-                "Tests failed. Review test implementation and ensure proper mocking/fixtures.",
-            ErrorType.COMPILATION_ERROR:
-                "Code has syntax errors. Review generated code for completeness.",
-            ErrorType.DEPENDENCY_MISSING:
-                "Task depends on incomplete prerequisites. Complete dependencies first.",
+            ErrorType.CLI_MALFORMED_RESPONSE: "Claude CLI returned malformed response. Consider using API directly or simplifying the prompt.",
+            ErrorType.API_RATE_LIMIT: "Hit API rate limit. Wait before retrying or reduce request frequency.",
+            ErrorType.IMPORT_ERROR: "Missing import in generated code. Ensure all dependencies are specified in the task.",
+            ErrorType.TEST_FAILURE: "Tests failed. Review test implementation and ensure proper mocking/fixtures.",
+            ErrorType.COMPILATION_ERROR: "Code has syntax errors. Review generated code for completeness.",
+            ErrorType.DEPENDENCY_MISSING: "Task depends on incomplete prerequisites. Complete dependencies first.",
         }
-        
+
         return suggestions.get(error_type, f"Error: {error_message[:100]}")
-    
+
     def _record_failure(
-        self, 
-        task: Task, 
-        diagnosis: ErrorDiagnosis,
-        context: Dict[str, Any]
+        self, task: Task, diagnosis: ErrorDiagnosis, context: dict[str, Any]
     ) -> None:
         """Record a task failure for history tracking.
-        
+
         Args:
             task: The failed task
             diagnosis: Error diagnosis
             context: Additional context
+
         """
         failure = TaskFailure(
             task_id=task.id,
@@ -475,21 +465,22 @@ Start with the basic structure and core functionality only."""
             error_message=diagnosis.error_message,
             diagnosis=diagnosis,
             cli_response=context.get("cli_response"),
-            agent_id=context.get("agent_id")
+            agent_id=context.get("agent_id"),
         )
-        
+
         if task.id not in self.failure_history:
             self.failure_history[task.id] = []
-        
+
         self.failure_history[task.id].append(failure)
-    
-    def get_task_failure_history(self, task_id: UUID) -> List[TaskFailure]:
+
+    def get_task_failure_history(self, task_id: UUID) -> list[TaskFailure]:
         """Get failure history for a task.
-        
+
         Args:
             task_id: Task ID
-            
+
         Returns:
             List of task failures
+
         """
         return self.failure_history.get(task_id, [])

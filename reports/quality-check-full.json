@@ -1,0 +1,75 @@
+{
+  "timestamp": "2025-07-23T18:47:30Z",
+  "total_checks": 11,
+  "passed_checks": 2,
+  "failed_checks": 9,
+  "success_rate": 0.18181818181818182,
+  "results": [
+    {
+      "check_name": "Black Code Formatting",
+      "passed": false,
+      "exit_code": -2,
+      "has_error": true
+    },
+    {
+      "check_name": "Ruff Linting - Critical Issues Only",
+      "passed": false,
+      "exit_code": -2,
+      "has_error": true
+    },
+    {
+      "check_name": "PyLint Critical Issues",
+      "passed": false,
+      "exit_code": 1,
+      "has_error": true
+    },
+    {
+      "check_name": "MyPy Type Checking",
+      "passed": true,
+      "exit_code": -2,
+      "has_error": true
+    },
+    {
+      "check_name": "Unit Tests",
+      "passed": false,
+      "exit_code": 4,
+      "has_error": true
+    },
+    {
+      "check_name": "Coverage Check",
+      "passed": false,
+      "exit_code": 4,
+      "has_error": true
+    },
+    {
+      "check_name": "Rust Clippy Linting",
+      "passed": false,
+      "exit_code": 101,
+      "has_error": true
+    },
+    {
+      "check_name": "Rust Unit Tests",
+      "passed": false,
+      "exit_code": 101,
+      "has_error": true
+    },
+    {
+      "check_name": "Rust Format Check",
+      "passed": false,
+      "exit_code": 1,
+      "has_error": false
+    },
+    {
+      "check_name": "Documentation Quality Gates",
+      "passed": false,
+      "exit_code": 1,
+      "has_error": false
+    },
+    {
+      "check_name": "Test Count Badge Generation",
+      "passed": true,
+      "exit_code": 0,
+      "has_error": false
+    }
+  ]
+}

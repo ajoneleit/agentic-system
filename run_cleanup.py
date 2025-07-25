@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
-import sys
 import subprocess
+import sys
 
 # Change to the directory containing the cleanup script
 os.chdir('/mnt/c/Users/ajoneleit/agentic-system')

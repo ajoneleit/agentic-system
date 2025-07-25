@@ -1,9 +1,8 @@
 [workspace]
 members = [
     "interaction-net",
-    "evolution",
-    "rewriter",
 ]
+resolver = "2"
 
 [workspace.package]
 version = "0.1.0"

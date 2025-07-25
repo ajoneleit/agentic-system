@@ -4,10 +4,10 @@ This module contains sophisticated prompts for analyzing user requests
 and breaking them down into executable tasks with dependencies.
 """
 
-from typing import Dict, Any
-from src.core.interfaces import PromptTemplate
+from typing import Any
 from uuid import uuid4
 
+from src.core.interfaces import PromptTemplate
 
 # Task decomposition prompt templates
 TASK_ANALYSIS_PROMPT = PromptTemplate(
@@ -218,8 +218,14 @@ Format as JSON:
         }}
     }}
 }}""",
-    variables=["task_name", "task_description", "deliverable", "project_context", 
-               "completed_dependencies", "task_id"],
+    variables=[
+        "task_name",
+        "task_description",
+        "deliverable",
+        "project_context",
+        "completed_dependencies",
+        "task_id",
+    ],
 )
 
 
@@ -336,20 +342,20 @@ Format as JSON:
         }}
     ]
 }}""",
-    variables=["active_tasks_json", "completed_tasks_json", "failed_tasks_json", 
-               "project_summary"],
+    variables=["active_tasks_json", "completed_tasks_json", "failed_tasks_json", "project_summary"],
 )
 
 
 # Prompt selection functions
 def get_decomposition_prompt(prompt_type: str) -> PromptTemplate:
     """Get a specific decomposition prompt template.
-    
+
     Args:
         prompt_type: Type of prompt needed
-        
+
     Returns:
         Corresponding prompt template
+
     """
     prompts = {
         "task_analysis": TASK_ANALYSIS_PROMPT,
@@ -358,25 +364,23 @@ def get_decomposition_prompt(prompt_type: str) -> PromptTemplate:
         "complexity_estimation": COMPLEXITY_ESTIMATION_PROMPT,
         "progress_aggregation": PROGRESS_AGGREGATION_PROMPT,
     }
-    
+
     if prompt_type not in prompts:
         raise ValueError(f"Unknown prompt type: {prompt_type}")
-    
+
     return prompts[prompt_type]
 
 
-def create_custom_decomposition_prompt(
-    objective: str,
-    context: Dict[str, Any]
-) -> PromptTemplate:
+def create_custom_decomposition_prompt(objective: str, context: dict[str, Any]) -> PromptTemplate:
     """Create a custom decomposition prompt for specific scenarios.
-    
+
     Args:
         objective: What the prompt should achieve
         context: Additional context for the prompt
-        
+
     Returns:
         Customized prompt template
+
     """
     template = f"""You are an expert software architect with a specific objective.
 
@@ -389,7 +393,7 @@ CONTEXT:
 
 Provide your analysis in structured JSON format appropriate for the objective.
 Consider all context provided and ensure your response is actionable and specific."""
-    
+
     return PromptTemplate(
         id=uuid4(),
         name=f"custom_{objective.lower().replace(' ', '_')}",
@@ -398,19 +402,20 @@ Consider all context provided and ensure your response is actionable and specifi
     )
 
 
-def dict_to_formatted_string(d: Dict[str, Any], indent: int = 0) -> str:
+def dict_to_formatted_string(d: dict[str, Any], indent: int = 0) -> str:
     """Convert dictionary to formatted string for prompts.
-    
+
     Args:
         d: Dictionary to format
         indent: Indentation level
-        
+
     Returns:
         Formatted string representation
+
     """
     lines = []
     indent_str = "  " * indent
-    
+
     for key, value in d.items():
         if isinstance(value, dict):
             lines.append(f"{indent_str}{key}:")
@@ -421,5 +426,5 @@ def dict_to_formatted_string(d: Dict[str, Any], indent: int = 0) -> str:
                 lines.append(f"{indent_str}  - {item}")
         else:
             lines.append(f"{indent_str}{key}: {value}")
-    
+
     return "\n".join(lines)

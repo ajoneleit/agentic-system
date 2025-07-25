@@ -4,40 +4,42 @@ This module defines specific exceptions for different failure modes,
 enabling precise error handling and recovery strategies throughout the system.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 from uuid import UUID
 
 
 class AgenticSystemError(Exception):
     """Base exception for all Agentic System errors.
-    
+
     All custom exceptions in the system inherit from this base class,
     enabling consistent error handling and logging.
     """
-    
+
     def __init__(
         self,
         message: str,
         error_code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        details: Optional[dict[str, Any]] = None,
     ):
         """Initialize base exception.
-        
+
         Args:
             message: Human-readable error message
             error_code: Machine-readable error code for programmatic handling
             details: Additional error context and debugging information
+
         """
         super().__init__(message)
         self.message = message
         self.error_code = error_code or self.__class__.__name__
         self.details = details or {}
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert exception to dictionary for logging/serialization.
-        
+
         Returns:
             Dictionary representation of the exception
+
         """
         return {
             "error_type": self.__class__.__name__,
@@ -50,14 +52,15 @@ class AgenticSystemError(Exception):
 # Task-related exceptions
 class TaskError(AgenticSystemError):
     """Base exception for task-related errors."""
-    
+
     def __init__(self, task_id: UUID, message: str, **kwargs: Any):
         """Initialize task error with task ID.
-        
+
         Args:
             task_id: ID of the task that caused the error
             message: Error message
             **kwargs: Additional error details
+
         """
         super().__init__(message, details={"task_id": str(task_id), **kwargs})
         self.task_id = task_id
@@ -65,14 +68,15 @@ class TaskError(AgenticSystemError):
 
 class TaskDecompositionError(TaskError):
     """Raised when task decomposition fails."""
-    
+
     def __init__(self, task_id: UUID, user_prompt: str, reason: str):
         """Initialize task decomposition error.
-        
+
         Args:
             task_id: ID of the parent task
             user_prompt: Original user prompt that failed decomposition
             reason: Reason for decomposition failure
+
         """
         super().__init__(
             task_id,
@@ -86,13 +90,14 @@ class TaskDecompositionError(TaskError):
 
 class TaskDependencyError(TaskError):
     """Raised when task dependencies cannot be resolved."""
-    
+
     def __init__(self, task_id: UUID, missing_deps: list[UUID]):
         """Initialize dependency error.
-        
+
         Args:
             task_id: ID of the task with missing dependencies
             missing_deps: List of missing dependency IDs
+
         """
         super().__init__(
             task_id,
@@ -103,14 +108,15 @@ class TaskDependencyError(TaskError):
 
 class TaskExecutionError(TaskError):
     """Raised when task execution fails."""
-    
+
     def __init__(self, task_id: UUID, agent_id: UUID, reason: str):
         """Initialize execution error.
-        
+
         Args:
             task_id: ID of the failed task
             agent_id: ID of the agent that failed
             reason: Reason for execution failure
+
         """
         super().__init__(
             task_id,
@@ -124,14 +130,15 @@ class TaskExecutionError(TaskError):
 # Agent-related exceptions
 class AgentError(AgenticSystemError):
     """Base exception for agent-related errors."""
-    
+
     def __init__(self, agent_id: UUID, message: str, **kwargs: Any):
         """Initialize agent error.
-        
+
         Args:
             agent_id: ID of the agent that caused the error
             message: Error message
             **kwargs: Additional error details
+
         """
         super().__init__(message, details={"agent_id": str(agent_id), **kwargs})
         self.agent_id = agent_id
@@ -139,14 +146,15 @@ class AgentError(AgenticSystemError):
 
 class AgentInitializationError(AgentError):
     """Raised when agent initialization fails."""
-    
+
     def __init__(self, agent_id: UUID, role: str, reason: str):
         """Initialize agent initialization error.
-        
+
         Args:
             agent_id: ID of the agent
             role: Role the agent was supposed to fulfill
             reason: Reason for initialization failure
+
         """
         super().__init__(
             agent_id,
@@ -158,7 +166,7 @@ class AgentInitializationError(AgentError):
 
 class AgentCommunicationError(AgentError):
     """Raised when inter-agent communication fails."""
-    
+
     def __init__(
         self,
         sender_id: UUID,
@@ -167,12 +175,13 @@ class AgentCommunicationError(AgentError):
         reason: str,
     ):
         """Initialize communication error.
-        
+
         Args:
             sender_id: ID of the sending agent
             receiver_id: ID of the receiving agent
             message_type: Type of message that failed
             reason: Reason for communication failure
+
         """
         super().__init__(
             sender_id,
@@ -185,14 +194,15 @@ class AgentCommunicationError(AgentError):
 
 class AgentOverloadError(AgentError):
     """Raised when an agent is overloaded with tasks."""
-    
+
     def __init__(self, agent_id: UUID, current_tasks: int, max_tasks: int):
         """Initialize overload error.
-        
+
         Args:
             agent_id: ID of the overloaded agent
             current_tasks: Number of current tasks
             max_tasks: Maximum allowed tasks
+
         """
         super().__init__(
             agent_id,
@@ -205,18 +215,19 @@ class AgentOverloadError(AgentError):
 # API-related exceptions
 class APIError(AgenticSystemError):
     """Base exception for API-related errors."""
-    
+
     pass
 
 
 class APIKeyError(APIError):
     """Raised when API key is invalid or missing."""
-    
+
     def __init__(self, service: str = "Anthropic"):
         """Initialize API key error.
-        
+
         Args:
             service: Name of the API service
+
         """
         super().__init__(
             f"{service} API key is invalid or missing",
@@ -227,17 +238,18 @@ class APIKeyError(APIError):
 
 class APIRateLimitError(APIError):
     """Raised when API rate limit is exceeded."""
-    
+
     def __init__(
         self,
         retry_after: Optional[int] = None,
         limit_type: str = "requests",
     ):
         """Initialize rate limit error.
-        
+
         Args:
             retry_after: Seconds to wait before retrying
             limit_type: Type of limit exceeded (requests, tokens, etc.)
+
         """
         super().__init__(
             f"API rate limit exceeded for {limit_type}",
@@ -252,7 +264,7 @@ class APIRateLimitError(APIError):
 
 class APIResponseError(APIError):
     """Raised when API returns an unexpected response."""
-    
+
     def __init__(
         self,
         status_code: Optional[int] = None,
@@ -260,11 +272,12 @@ class APIResponseError(APIError):
         reason: str = "Unexpected API response",
     ):
         """Initialize API response error.
-        
+
         Args:
             status_code: HTTP status code
             response_body: Response body for debugging
             reason: Human-readable reason
+
         """
         super().__init__(
             reason,
@@ -278,13 +291,14 @@ class APIResponseError(APIError):
 
 class APITimeoutError(APIError):
     """Raised when API request times out."""
-    
+
     def __init__(self, timeout_seconds: int, operation: str):
         """Initialize timeout error.
-        
+
         Args:
             timeout_seconds: Timeout duration
             operation: Operation that timed out
+
         """
         super().__init__(
             f"API request timed out after {timeout_seconds}s during {operation}",
@@ -299,7 +313,7 @@ class APITimeoutError(APIError):
 # Verification-related exceptions
 class VerificationError(AgenticSystemError):
     """Base exception for verification-related errors."""
-    
+
     def __init__(
         self,
         artifact_id: UUID,
@@ -308,12 +322,13 @@ class VerificationError(AgenticSystemError):
         **kwargs: Any,
     ):
         """Initialize verification error.
-        
+
         Args:
             artifact_id: ID of the artifact that failed verification
             verification_type: Type of verification that failed
             message: Error message
             **kwargs: Additional error details
+
         """
         super().__init__(
             message,
@@ -329,7 +344,7 @@ class VerificationError(AgenticSystemError):
 
 class CompilationError(VerificationError):
     """Raised when code compilation fails."""
-    
+
     def __init__(
         self,
         artifact_id: UUID,
@@ -338,12 +353,13 @@ class CompilationError(VerificationError):
         language: str,
     ):
         """Initialize compilation error.
-        
+
         Args:
             artifact_id: ID of the artifact
             errors: List of compilation errors
             warnings: List of compilation warnings
             language: Programming language
+
         """
         super().__init__(
             artifact_id,
@@ -357,7 +373,7 @@ class CompilationError(VerificationError):
 
 class TestFailureError(VerificationError):
     """Raised when tests fail."""
-    
+
     def __init__(
         self,
         artifact_id: UUID,
@@ -367,13 +383,14 @@ class TestFailureError(VerificationError):
         coverage: Optional[float] = None,
     ):
         """Initialize test failure error.
-        
+
         Args:
             artifact_id: ID of the artifact
             failed_tests: List of failed test names
             passed_tests: Number of passed tests
             total_tests: Total number of tests
             coverage: Code coverage percentage
+
         """
         super().__init__(
             artifact_id,
@@ -388,7 +405,7 @@ class TestFailureError(VerificationError):
 
 class QualityCheckError(VerificationError):
     """Raised when code quality checks fail."""
-    
+
     def __init__(
         self,
         artifact_id: UUID,
@@ -396,11 +413,12 @@ class QualityCheckError(VerificationError):
         quality_score: float,
     ):
         """Initialize quality check error.
-        
+
         Args:
             artifact_id: ID of the artifact
             quality_issues: Dictionary of quality issue categories and issues
             quality_score: Overall quality score
+
         """
         super().__init__(
             artifact_id,
@@ -414,18 +432,19 @@ class QualityCheckError(VerificationError):
 # Artifact-related exceptions
 class ArtifactError(AgenticSystemError):
     """Base exception for artifact-related errors."""
-    
+
     pass
 
 
 class ArtifactNotFoundError(ArtifactError):
     """Raised when an artifact cannot be found."""
-    
+
     def __init__(self, artifact_id: UUID):
         """Initialize not found error.
-        
+
         Args:
             artifact_id: ID of the missing artifact
+
         """
         super().__init__(
             f"Artifact {artifact_id} not found",
@@ -436,7 +455,7 @@ class ArtifactNotFoundError(ArtifactError):
 
 class ArtifactVersionConflictError(ArtifactError):
     """Raised when artifact version conflicts occur."""
-    
+
     def __init__(
         self,
         artifact_name: str,
@@ -444,11 +463,12 @@ class ArtifactVersionConflictError(ArtifactError):
         requested_version: int,
     ):
         """Initialize version conflict error.
-        
+
         Args:
             artifact_name: Name of the artifact
             current_version: Current version number
             requested_version: Requested version number
+
         """
         super().__init__(
             f"Version conflict for {artifact_name}: current={current_version}, requested={requested_version}",
@@ -463,17 +483,18 @@ class ArtifactVersionConflictError(ArtifactError):
 
 class ArtifactDependencyError(ArtifactError):
     """Raised when artifact dependencies cannot be resolved."""
-    
+
     def __init__(
         self,
         artifact_id: UUID,
         missing_dependencies: list[UUID],
     ):
         """Initialize dependency error.
-        
+
         Args:
             artifact_id: ID of the artifact
             missing_dependencies: List of missing dependency IDs
+
         """
         super().__init__(
             f"Cannot resolve dependencies for artifact {artifact_id}",
@@ -488,20 +509,21 @@ class ArtifactDependencyError(ArtifactError):
 # Configuration-related exceptions
 class ConfigurationError(AgenticSystemError):
     """Base exception for configuration errors."""
-    
+
     pass
 
 
 class InvalidConfigurationError(ConfigurationError):
     """Raised when configuration is invalid."""
-    
+
     def __init__(self, config_key: str, reason: str, suggestion: Optional[str] = None):
         """Initialize invalid configuration error.
-        
+
         Args:
             config_key: Configuration key that is invalid
             reason: Reason why configuration is invalid
             suggestion: Suggested fix
+
         """
         details = {
             "config_key": config_key,
@@ -509,7 +531,7 @@ class InvalidConfigurationError(ConfigurationError):
         }
         if suggestion:
             details["suggestion"] = suggestion
-            
+
         super().__init__(
             f"Invalid configuration for '{config_key}': {reason}",
             error_code="INVALID_CONFIG",
@@ -519,21 +541,22 @@ class InvalidConfigurationError(ConfigurationError):
 
 class MissingConfigurationError(ConfigurationError):
     """Raised when required configuration is missing."""
-    
+
     def __init__(self, config_key: str, env_var: Optional[str] = None):
         """Initialize missing configuration error.
-        
+
         Args:
             config_key: Missing configuration key
             env_var: Environment variable name if applicable
+
         """
         message = f"Required configuration '{config_key}' is missing"
         details = {"config_key": config_key}
-        
+
         if env_var:
             message += f" (environment variable: {env_var})"
             details["env_var"] = env_var
-            
+
         super().__init__(
             message,
             error_code="MISSING_CONFIG",
@@ -544,19 +567,20 @@ class MissingConfigurationError(ConfigurationError):
 # Subprocess-related exceptions
 class SubprocessError(AgenticSystemError):
     """Base exception for subprocess execution errors."""
-    
+
     pass
 
 
 class SubprocessTimeoutError(SubprocessError):
     """Raised when subprocess execution times out."""
-    
+
     def __init__(self, command: str, timeout: int):
         """Initialize timeout error.
-        
+
         Args:
             command: Command that timed out
             timeout: Timeout duration in seconds
+
         """
         super().__init__(
             f"Subprocess timed out after {timeout}s: {command}",
@@ -570,14 +594,15 @@ class SubprocessTimeoutError(SubprocessError):
 
 class SubprocessMemoryError(SubprocessError):
     """Raised when subprocess exceeds memory limit."""
-    
+
     def __init__(self, command: str, memory_limit_mb: int, actual_mb: float):
         """Initialize memory error.
-        
+
         Args:
             command: Command that exceeded memory
             memory_limit_mb: Memory limit in MB
             actual_mb: Actual memory usage in MB
+
         """
         super().__init__(
             f"Subprocess exceeded memory limit: {actual_mb:.1f}MB > {memory_limit_mb}MB",
@@ -588,3 +613,34 @@ class SubprocessMemoryError(SubprocessError):
                 "actual_memory_mb": actual_mb,
             },
         )
+
+
+# Project and storage-related exceptions
+class ProjectError(AgenticSystemError):
+    """Base exception for project-related errors."""
+
+    pass
+
+
+class StorageError(AgenticSystemError):
+    """Base exception for storage-related errors."""
+
+    pass
+
+
+class ResultProcessingError(AgenticSystemError):
+    """Exception for result processing errors."""
+
+    pass
+
+
+class MetaAgentError(AgenticSystemError):
+    """Exception for MetaAgent-related errors."""
+
+    pass
+
+
+class AgentSpawnError(AgenticSystemError):
+    """Exception for agent spawning errors."""
+
+    pass

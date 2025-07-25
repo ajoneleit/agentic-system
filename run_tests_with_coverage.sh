@@ -22,7 +22,7 @@ python -m pytest tests/ \
     --cov-report=html \
     --cov-report=term-missing \
     --cov-report=xml \
-    --cov-fail-under=60 \
+    --cov-fail-under=90 \
     -v \
     --tb=short
 

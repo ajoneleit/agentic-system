@@ -19,7 +19,7 @@ from src.core.interfaces import Artifact, ArtifactType
 async def main():
     """Run a simple artifact management demonstration."""
     print("=== Simple Artifact Management Demo ===\n")
-    
+
     # Initialize artifact manager
     storage_path = Path("./demo_artifacts")
     manager = ArtifactManager(
@@ -29,7 +29,7 @@ async def main():
     )
     await manager.initialize()
     print("✓ Artifact manager initialized")
-    
+
     # Create a sample artifact
     artifact = Artifact(
         id=uuid4(),
@@ -45,18 +45,18 @@ async def main():
         agent_id=uuid4(),
         tags={"demo", "hello"}
     )
-    
+
     # Store the artifact
     stored = await manager.store_artifact(artifact)
     print(f"✓ Stored artifact: {stored.name} (ID: {stored.id})")
     print(f"  - Size: {stored.size_bytes} bytes")
     print(f"  - Checksum: {stored.checksum[:16]}...")
-    
+
     # Retrieve the artifact
     retrieved = await manager.get_artifact(artifact.id)
     print(f"\n✓ Retrieved artifact: {retrieved.name}")
     print(f"  - Content matches: {retrieved.content == artifact.content}")
-    
+
     # Update the artifact
     updated = await manager.update_artifact(
         artifact.id,
@@ -64,17 +64,17 @@ async def main():
         reason="Added goodbye function"
     )
     print(f"\n✓ Updated artifact to version {updated.version}")
-    
+
     # Get all versions
     versions = await manager.get_artifact_versions(artifact.id)
     print(f"\n✓ Available versions: {[v.version for v in versions]}")
-    
+
     # Get metrics
     metrics = await manager.get_metrics()
-    print(f"\n✓ Metrics:")
+    print("\n✓ Metrics:")
     print(f"  - Total artifacts: {metrics['total_artifacts']}")
     print(f"  - Cache hit rate: {metrics['cache_hit_rate']:.0%}")
-    
+
     # Clean up
     import shutil
     if storage_path.exists():

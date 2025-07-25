@@ -1,13 +1,13 @@
 """Utilities for the verification system."""
 
-from .subprocess_runner import SubprocessRunner, RunResult
 from .report_parser import ReportParser, TestReport
 from .sandbox import Sandbox, SandboxConfig
+from .subprocess_runner import RunResult, SubprocessRunner
 
 __all__ = [
     "SubprocessRunner",
     "RunResult",
-    "ReportParser", 
+    "ReportParser",
     "TestReport",
     "Sandbox",
     "SandboxConfig",

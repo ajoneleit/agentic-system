@@ -4,10 +4,10 @@ This module contains prompts tailored for each type of sub-agent,
 ensuring they receive clear, specific instructions for their tasks.
 """
 
-from typing import Dict, Any, List
-from src.core.interfaces import PromptTemplate, AgentRole
+from typing import Any
 from uuid import uuid4
 
+from src.core.interfaces import AgentRole, PromptTemplate
 
 # Code Generator Agent Prompts
 CODE_GENERATION_PROMPT = PromptTemplate(
@@ -51,8 +51,14 @@ After writing the code, provide a brief summary in this JSON format:
 }}
 
 Focus on writing clean, working code directly to files.""",
-    variables=["task_specification", "project_context", "language", 
-               "frameworks", "style_guide", "available_artifacts"],
+    variables=[
+        "task_specification",
+        "project_context",
+        "language",
+        "frameworks",
+        "style_guide",
+        "available_artifacts",
+    ],
 )
 
 
@@ -99,8 +105,13 @@ After writing the tests, provide a brief summary in this JSON format:
 }}
 
 Focus on writing comprehensive, working tests.""",
-    variables=["code_to_test", "task_specification", "test_framework", 
-               "coverage_target", "project_context"],
+    variables=[
+        "code_to_test",
+        "task_specification",
+        "test_framework",
+        "coverage_target",
+        "project_context",
+    ],
 )
 
 
@@ -155,8 +166,7 @@ Output Format:
 IMPORTANT: Actually, ignore the JSON format above. You are working directly in a project workspace.
 Write documentation files directly (e.g., README.md, API.md, docs/).
 Just create the files and provide a brief summary of what documentation you created.""",
-    variables=["code_to_document", "doc_type", "target_audience", 
-               "project_context", "doc_style"],
+    variables=["code_to_document", "doc_type", "target_audience", "project_context", "doc_style"],
 )
 
 
@@ -193,8 +203,7 @@ After refactoring, provide a brief summary of:
 - Key improvements made
 - Any breaking changes
 - Performance improvements if applicable""",
-    variables=["code_to_refactor", "refactoring_goals", "constraints", 
-               "project_context"],
+    variables=["code_to_refactor", "refactoring_goals", "constraints", "project_context"],
 )
 
 
@@ -236,8 +245,13 @@ After fixing, provide a brief summary including:
 - How you fixed it
 - Files created/modified
 - Any additional debugging tools added""",
-    variables=["problematic_code", "error_info", "expected_behavior", 
-               "actual_behavior", "project_context"],
+    variables=[
+        "problematic_code",
+        "error_info",
+        "expected_behavior",
+        "actual_behavior",
+        "project_context",
+    ],
 )
 
 
@@ -268,9 +282,15 @@ Execute your task following these principles:
 5. Follow all project conventions
 
 Begin your work and provide updates as specified.""",
-    variables=["agent_role", "role_description", "task_details", 
-               "active_agents", "completed_tasks", "shared_resources", 
-               "specific_instructions"],
+    variables=[
+        "agent_role",
+        "role_description",
+        "task_details",
+        "active_agents",
+        "completed_tasks",
+        "shared_resources",
+        "specific_instructions",
+    ],
 )
 
 
@@ -308,13 +328,14 @@ Format your response as:
 # Agent prompt selection and customization
 def get_agent_prompt(agent_role: AgentRole, prompt_type: str) -> PromptTemplate:
     """Get the appropriate prompt for an agent role and situation.
-    
+
     Args:
         agent_role: The role of the agent
         prompt_type: Type of prompt needed
-        
+
     Returns:
         Appropriate prompt template
+
     """
     role_prompts = {
         AgentRole.CORE_LOGIC: {
@@ -338,32 +359,30 @@ def get_agent_prompt(agent_role: AgentRole, prompt_type: str) -> PromptTemplate:
             "status": AGENT_STATUS_PROMPT,
         },
     }
-    
+
     if agent_role not in role_prompts:
         raise ValueError(f"Unknown agent role: {agent_role}")
-    
+
     if prompt_type not in role_prompts[agent_role]:
         raise ValueError(f"Unknown prompt type '{prompt_type}' for role {agent_role}")
-    
+
     return role_prompts[agent_role][prompt_type]
 
 
 def create_collaboration_prompt(
-    sender_role: AgentRole,
-    receiver_role: AgentRole,
-    message_type: str,
-    context: Dict[str, Any]
+    sender_role: AgentRole, receiver_role: AgentRole, message_type: str, context: dict[str, Any]
 ) -> PromptTemplate:
     """Create a prompt for inter-agent collaboration.
-    
+
     Args:
         sender_role: Role of the sending agent
         receiver_role: Role of the receiving agent
         message_type: Type of collaboration message
         context: Additional context
-        
+
     Returns:
         Collaboration prompt template
+
     """
     template = f"""You are a {receiver_role.value} agent receiving a message from a {sender_role.value} agent.
 
@@ -382,7 +401,7 @@ Based on this message and your role, provide an appropriate response that:
 4. Includes any relevant artifacts or information
 
 Format your response appropriately for the message type."""
-    
+
     return PromptTemplate(
         id=uuid4(),
         name=f"collab_{sender_role.value}_to_{receiver_role.value}",
@@ -391,11 +410,11 @@ Format your response appropriately for the message type."""
     )
 
 
-def dict_to_formatted_string(d: Dict[str, Any], indent: int = 0) -> str:
+def dict_to_formatted_string(d: dict[str, Any], indent: int = 0) -> str:
     """Convert dictionary to formatted string for prompts."""
     lines = []
     indent_str = "  " * indent
-    
+
     for key, value in d.items():
         if isinstance(value, dict):
             lines.append(f"{indent_str}{key}:")
@@ -406,5 +425,5 @@ def dict_to_formatted_string(d: Dict[str, Any], indent: int = 0) -> str:
                 lines.append(f"{indent_str}  - {item}")
         else:
             lines.append(f"{indent_str}{key}: {value}")
-    
+
     return "\n".join(lines)

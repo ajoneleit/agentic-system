@@ -15,9 +15,9 @@ try:
         # Get all items in the projects directory
         items = os.listdir(base_path)
         print(f"Found {len(items)} items in projects directory")
-        
+
         removed_count = 0
-        
+
         for item in items:
             if item not in keep_items:
                 item_path = os.path.join(base_path, item)
@@ -34,17 +34,17 @@ try:
                     print(f"Error removing {item}: {e}")
             else:
                 print(f"Keeping: {item}")
-        
+
         print(f"\nCleanup complete. Removed {removed_count} items.")
-        
+
         # List remaining items
         print("\nRemaining items in projects directory:")
         remaining = os.listdir(base_path)
         for item in remaining:
             print(f"  {item}")
-        
+
         print("\nCleanup finished successfully!")
-        
+
 except Exception as e:
     print(f"Error during cleanup: {e}")
     import traceback

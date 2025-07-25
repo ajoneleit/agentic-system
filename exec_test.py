@@ -1,5 +1,3 @@
-import os
-import shutil
 
 # Execute the cleanup code directly
 code = '''

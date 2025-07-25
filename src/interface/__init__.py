@@ -3,7 +3,7 @@
 This module provides user interface components and command handling.
 """
 
-from .slash_commands import ZeroInterface, CommandResult
+from .slash_commands import CommandResult, ZeroInterface
 
 __all__ = [
     "ZeroInterface",

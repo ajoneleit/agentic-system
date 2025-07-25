@@ -21,7 +21,7 @@ def setup_test_logging():
     """Configure logging for tests."""
     # Disable all logging during tests
     logging.disable(logging.CRITICAL)
-    
+
     # Configure structlog for testing
     structlog.configure(
         processors=[
@@ -33,9 +33,9 @@ def setup_test_logging():
         logger_factory=structlog.PrintLoggerFactory(),
         cache_logger_on_first_use=False
     )
-    
+
     yield
-    
+
     # Re-enable logging after tests
     logging.disable(logging.NOTSET)
 
@@ -58,14 +58,14 @@ def anyio_backend():
 async def cleanup_tasks():
     """Clean up any pending tasks after each test."""
     yield
-    
+
     # Get all tasks
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-    
+
     # Cancel them
     for task in tasks:
         task.cancel()
-    
+
     # Wait for them to be cancelled
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -75,7 +75,7 @@ async def cleanup_tasks():
 def mock_claude_client():
     """Mock ClaudeClient for tests."""
     from unittest.mock import AsyncMock, MagicMock
-    
+
     client = MagicMock()
     client.create_message = AsyncMock()
     client.close = AsyncMock()

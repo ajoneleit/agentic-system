@@ -14,7 +14,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Environment(str, Enum):
     """Supported execution environments."""
-    
+
     DEVELOPMENT = "development"
     TESTING = "testing"
     STAGING = "staging"
@@ -23,7 +23,7 @@ class Environment(str, Enum):
 
 class LogLevel(str, Enum):
     """Supported logging levels."""
-    
+
     DEBUG = "DEBUG"
     INFO = "INFO"
     WARNING = "WARNING"
@@ -33,7 +33,7 @@ class LogLevel(str, Enum):
 
 class ClaudeModel(str, Enum):
     """Available Claude model variants."""
-    
+
     OPUS = "claude-3-5-opus-latest"
     SONNET = "claude-3-5-sonnet-latest"
     HAIKU = "claude-3-5-haiku-latest"
@@ -41,7 +41,7 @@ class ClaudeModel(str, Enum):
 
 class APISettings(BaseModel):
     """Claude API configuration."""
-    
+
     key: SecretStr = Field(..., description="Anthropic API key")
     base_url: str = Field(
         default="https://api.anthropic.com",
@@ -55,7 +55,7 @@ class APISettings(BaseModel):
 
 class OpenAISettings(BaseModel):
     """OpenAI API configuration."""
-    
+
     key: SecretStr = Field(..., description="OpenAI API key")
     model: str = Field(
         default="gpt-4-turbo-preview",
@@ -71,7 +71,7 @@ class OpenAISettings(BaseModel):
 
 class AgentSettings(BaseModel):
     """Agent system configuration."""
-    
+
     max_parallel_agents: int = Field(default=10, description="Maximum concurrent agents")
     use_openai_for_meta_agent: bool = Field(
         default=True,
@@ -93,7 +93,7 @@ class AgentSettings(BaseModel):
         default=5,
         description="Maximum repair loop iterations"
     )
-    
+
     # Retry configuration
     task_max_retries: int = Field(
         default=3,
@@ -127,7 +127,7 @@ class AgentSettings(BaseModel):
         default=True,
         description="Modify prompts based on failure analysis"
     )
-    
+
     context_window_buffer: int = Field(
         default=1000,
         description="Token buffer to prevent context overflow"
@@ -136,7 +136,7 @@ class AgentSettings(BaseModel):
 
 class CLISettings(BaseModel):
     """Claude Code configuration."""
-    
+
     use_cli_for_subagents: bool = Field(
         default=False,
         description="Enable CLI mode for sub-agents"
@@ -161,7 +161,7 @@ class CLISettings(BaseModel):
         default=True,
         description="Stream CLI output to prevent memory issues"
     )
-    
+
     # Quality gates for CLI output
     enable_quality_gates: bool = Field(
         default=True,
@@ -179,7 +179,7 @@ class CLISettings(BaseModel):
         default=0,
         description="Maximum allowed security issues"
     )
-    
+
     # Feedback loop configuration
     enable_feedback_loop: bool = Field(
         default=True,
@@ -197,7 +197,7 @@ class CLISettings(BaseModel):
 
 class VerificationSettings(BaseModel):
     """Code verification configuration."""
-    
+
     enable_compilation_check: bool = Field(default=True)
     enable_test_verification: bool = Field(default=True)
     minimum_coverage: float = Field(
@@ -211,7 +211,7 @@ class VerificationSettings(BaseModel):
     supported_languages: List[str] = Field(
         default_factory=lambda: ["python", "javascript", "typescript", "java", "go"]
     )
-    
+
     @validator("minimum_coverage")
     def validate_coverage(cls, v: float) -> float:
         """Ensure coverage is a valid percentage."""
@@ -222,7 +222,7 @@ class VerificationSettings(BaseModel):
 
 class LearningSettings(BaseModel):
     """Learning system configuration."""
-    
+
     enable_learning: bool = Field(default=True)
     pattern_threshold: int = Field(
         default=3,
@@ -240,7 +240,7 @@ class LearningSettings(BaseModel):
 
 class StorageSettings(BaseModel):
     """Artifact storage configuration."""
-    
+
     base_path: Path = Field(
         default=Path("./artifacts"),
         description="Base path for artifact storage"
@@ -258,7 +258,7 @@ class StorageSettings(BaseModel):
 
 class LoggingSettings(BaseModel):
     """Logging configuration."""
-    
+
     level: LogLevel = Field(default=LogLevel.INFO)
     format: str = Field(
         default="json",
@@ -276,7 +276,7 @@ class LoggingSettings(BaseModel):
 
 class ObservabilitySettings(BaseModel):
     """Observability and monitoring configuration."""
-    
+
     enable_metrics: bool = Field(
         default=True,
         description="Enable Prometheus metrics collection"
@@ -323,7 +323,7 @@ class Settings(BaseSettings):
     2. .env file
     3. Default values
     """
-    
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -332,7 +332,7 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
-    
+
     # Core settings
     environment: Environment = Field(
         default=Environment.DEVELOPMENT,
@@ -344,7 +344,7 @@ class Settings(BaseSettings):
         description="Project name"
     )
     version: str = Field(default="0.1.0", description="Application version")
-    
+
     # Component settings
     api: APISettings
     openai: Optional[OpenAISettings] = None
@@ -355,31 +355,31 @@ class Settings(BaseSettings):
     storage: StorageSettings = Field(default_factory=StorageSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
-    
+
     # Performance settings
     enable_profiling: bool = Field(default=False)
     enable_metrics: bool = Field(default=True)
     metrics_port: int = Field(default=9090)
-    
+
     # MCP settings
     mcp_config_path: str = Field(default="mcp-config.json", description="Path to MCP configuration file")
-    
+
     @validator("storage")
     def ensure_storage_path(cls, v: StorageSettings) -> StorageSettings:
         """Create storage directory if it doesn't exist."""
         v.base_path.mkdir(parents=True, exist_ok=True)
         return v
-    
+
     @property
     def is_production(self) -> bool:
         """Check if running in production mode."""
         return self.environment == Environment.PRODUCTION
-    
+
     @property
     def is_development(self) -> bool:
         """Check if running in development mode."""
         return self.environment == Environment.DEVELOPMENT
-    
+
     def get_model_for_task(self, task_complexity: str) -> ClaudeModel:
         """Select appropriate model based on task complexity.
         
@@ -388,6 +388,7 @@ class Settings(BaseSettings):
             
         Returns:
             Appropriate Claude model for the task
+
         """
         complexity_map = {
             "simple": ClaudeModel.HAIKU,
@@ -395,7 +396,7 @@ class Settings(BaseSettings):
             "complex": ClaudeModel.OPUS,
         }
         return complexity_map.get(task_complexity, self.agent.default_model)
-    
+
     def to_dict(self, exclude_secrets: bool = True) -> Dict[str, Any]:
         """Convert settings to dictionary.
         
@@ -404,12 +405,13 @@ class Settings(BaseSettings):
             
         Returns:
             Dictionary representation of settings
+
         """
         data = self.model_dump()
-        
+
         if exclude_secrets and "api" in data:
             data["api"]["key"] = "***REDACTED***"
-            
+
         return data
 
 
@@ -422,6 +424,7 @@ def get_settings() -> Settings:
     
     Returns:
         Global settings instance
+
     """
     global settings
     if settings is None:
@@ -434,6 +437,7 @@ def reload_settings() -> Settings:
     
     Returns:
         Reloaded settings instance
+
     """
     global settings
     settings = Settings()

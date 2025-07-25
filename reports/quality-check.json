@@ -1,0 +1,27 @@
+{
+  "timestamp": "2025-07-23T18:16:32Z",
+  "total_checks": 3,
+  "passed_checks": 0,
+  "failed_checks": 3,
+  "success_rate": 0.0,
+  "results": [
+    {
+      "check_name": "Black Code Formatting",
+      "passed": false,
+      "exit_code": 1,
+      "has_error": true
+    },
+    {
+      "check_name": "Ruff Linting",
+      "passed": false,
+      "exit_code": 1,
+      "has_error": false
+    },
+    {
+      "check_name": "PyLint Critical Issues",
+      "passed": false,
+      "exit_code": 2,
+      "has_error": false
+    }
+  ]
+}

@@ -14,28 +14,26 @@ from src.core.interfaces import Task, TaskContext
 from src.utils.app_logging import get_logger, setup_logging
 from src.utils.health_check import validate_system_health
 
-
 logger = get_logger(__name__)
 
 
 async def demonstrate_basic_agent_system():
     """Demonstrate the full agent system with MetaAgent orchestration."""
-    
     logger.info("=== Demonstrating Agent System ===")
-    
+
     # First, run health check
     logger.info("Running system health check...")
     is_healthy, _ = await validate_system_health()
-    
+
     if not is_healthy:
         logger.error("System is not healthy! Check the health report for details.")
         return
-    
+
     logger.info("System is healthy, proceeding with demonstration...")
-    
+
     # Get settings
     settings = get_settings()
-    
+
     # Check if we have API key
     if not settings.api or not settings.api.key:
         logger.warning("""
@@ -47,12 +45,12 @@ To run this demo:
 3. Run this example again
 """)
         return
-    
+
     try:
         # Create MetaAgent
         logger.info("Initializing Meta Agent...")
         meta_agent = MetaAgent()
-        
+
         # Initialize with context
         context = TaskContext(
             project_root=Path.cwd() / "projects" / "demo_project",
@@ -62,7 +60,7 @@ To run this demo:
             }
         )
         await meta_agent.initialize(context)
-        
+
         # Example 1: Simple code generation
         logger.info("\n--- Example 1: Simple Code Generation ---")
         user_request = """
@@ -73,10 +71,10 @@ To run this demo:
         - divide(a, b): returns quotient (handle division by zero)
         Include proper docstrings and type hints.
         """
-        
+
         logger.info("Processing user request...")
         result = await meta_agent.process_request(user_request)
-        
+
         logger.info(f"""
 Request completed!
 - Tasks completed: {result.tasks_completed}
@@ -85,7 +83,7 @@ Request completed!
 - Execution time: {result.execution_time:.2f} seconds
 - Artifacts generated: {len(result.artifacts)}
 """)
-        
+
         # Example 2: More complex request (if first one succeeded)
         if result.success_rate > 0.5:
             logger.info("\n--- Example 2: Complex Project ---")
@@ -98,10 +96,10 @@ Request completed!
             5. Basic unit tests for all endpoints
             6. API documentation
             """
-            
+
             logger.info("Processing complex request...")
             result2 = await meta_agent.process_request(complex_request)
-            
+
             logger.info(f"""
 Complex request completed!
 - Tasks completed: {result2.tasks_completed}
@@ -109,11 +107,11 @@ Complex request completed!
 - Success rate: {result2.success_rate:.2%}
 - Execution time: {result2.execution_time:.2f} seconds
 """)
-        
+
         # Show progress monitoring
         logger.info("\n--- System Progress Report ---")
         progress = await meta_agent.monitor_progress()
-        
+
         if "aggregated_analysis" in progress and progress["aggregated_analysis"]:
             analysis = progress["aggregated_analysis"]
             logger.info(f"""
@@ -121,36 +119,35 @@ Overall Progress:
 - Completion: {analysis.get('overall_progress', {}).get('completion_percentage', 0)}%
 - Critical Path Status: {analysis.get('critical_path', {}).get('status', 'unknown')}
 """)
-        
+
         # Cleanup
         logger.info("\nShutting down Meta Agent...")
         await meta_agent.shutdown()
-        
+
     except Exception as e:
         logger.error(f"Agent system demo failed: {e}", exc_info=True)
 
 
 async def demonstrate_task_decomposition():
     """Demonstrate how MetaAgent decomposes tasks."""
-    
     logger.info("\n=== Demonstrating Task Decomposition ===")
-    
+
     settings = get_settings()
     if not settings.api or not settings.api.key:
         logger.warning("Skipping task decomposition demo - no API key")
         return
-    
+
     try:
         meta_agent = MetaAgent()
-        
+
         # Simple request
         request = "Create a Python script that fetches weather data from an API and displays it"
-        
+
         logger.info(f"User request: {request}")
         logger.info("Decomposing into tasks...")
-        
+
         tasks = await meta_agent.decompose_task(request)
-        
+
         logger.info(f"\nDecomposed into {len(tasks)} tasks:")
         for i, task in enumerate(tasks, 1):
             deps = len(task.dependencies)
@@ -162,9 +159,9 @@ Task {i}: {task.name}
 - Required Role: {task.required_role.value if task.required_role else 'any'}
 - Dependencies: {deps} other task(s)
 """)
-        
+
         await meta_agent.shutdown()
-        
+
     except Exception as e:
         logger.error(f"Task decomposition demo failed: {e}")
 
@@ -172,13 +169,13 @@ Task {i}: {task.name}
 async def demonstrate_error_handling():
     """Demonstrate error handling capabilities."""
     from src.core.exceptions import (
-        TaskExecutionError,
-        TaskDecompositionError,
         AgentError,
+        TaskDecompositionError,
+        TaskExecutionError,
     )
-    
+
     logger.info("\n=== Demonstrating Error Handling ===")
-    
+
     # Example 1: Task execution error
     try:
         raise TaskExecutionError(
@@ -189,7 +186,7 @@ async def demonstrate_error_handling():
     except TaskExecutionError as e:
         logger.error(f"Caught task execution error: {e.message}")
         logger.debug(f"Error details: {e.to_dict()}")
-    
+
     # Example 2: Task decomposition error
     try:
         raise TaskDecompositionError(
@@ -199,7 +196,7 @@ async def demonstrate_error_handling():
         )
     except TaskDecompositionError as e:
         logger.error(f"Caught decomposition error: {e.message}")
-    
+
     # Example 3: Agent error
     try:
         raise AgentError(
@@ -213,15 +210,15 @@ async def demonstrate_error_handling():
 async def main():
     """Main entry point."""
     print("=== Agentic Coding System - Usage Examples ===\n")
-    
+
     # Setup logging
     setup_logging()
-    
+
     # Run demonstrations
     await demonstrate_basic_agent_system()
     await demonstrate_task_decomposition()
     await demonstrate_error_handling()
-    
+
     print("\n=== All demos completed! ===")
 
 

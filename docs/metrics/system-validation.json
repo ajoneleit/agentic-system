@@ -1,0 +1,57 @@
+{
+  "timestamp": "2025-07-23T13:48:04.439708",
+  "overall_score": "7/8",
+  "success_rate": 0.875,
+  "passed_count": 7,
+  "total_count": 8,
+  "validation_results": {
+    "ci_pipeline": {
+      "status": "\u26a0\ufe0f PARTIAL",
+      "message": "Found CI configs: ['.github/workflows/ci.yml', '.github/workflows/documentation.yml']",
+      "details": "GitHub CLI not available - manual verification required",
+      "action": "Install GitHub CLI and test manually"
+    },
+    "quality_reports": {
+      "status": "\u2705 PASS",
+      "message": "Found reports: ['coverage.xml', 'reports/pylint.json', 'reports/coverage.xml', 'coverage.xml']",
+      "details": "All quality reports present",
+      "action": "Reports available"
+    },
+    "baseline_metrics": {
+      "status": "\u2705 PASS",
+      "message": "Baseline found: /mnt/c/Users/ajoneleit/agentic-system/artifacts/baseline_2025-07-23",
+      "details": "Contains: ['reality-check.json', 'coverage_summary.json', 'quality_summary.json']",
+      "action": "Baseline metrics available"
+    },
+    "reality_check_badge": {
+      "status": "\u2705 PASS",
+      "message": "System status indicators found in README.md",
+      "details": "Found patterns: ['![System Health]', '![Validation Status]', '![Validation Status]']",
+      "action": "Verify badge shows current system health status"
+    },
+    "documentation_claims": {
+      "status": "\u274c FAIL",
+      "message": "Found 11 unqualified production claims",
+      "details": "Critical: ['Production-Ready in /mnt/c/Users/ajoneleit/agentic-system/README.md', 'Fully tested in /mnt/c/Users/ajoneleit/agentic-system/docs/step2_test_coverage_analysis.md', 'Fully tested in /mnt/c/Users/ajoneleit/agentic-system/docs/step2_test_coverage_analysis.md']",
+      "action": "Remove unsubstantiated claims or add qualifiers like \"development phase\", \"alpha version\""
+    },
+    "guiding_principles": {
+      "status": "\u2705 PASS",
+      "message": "Guiding principles implementation complete",
+      "details": "Validation tools: \u2705, CI integration: \u2705, Pre-commit: \u2705",
+      "action": "Guiding principles actively enforced"
+    },
+    "documentation_structure": {
+      "status": "\u2705 PASS",
+      "message": "Documentation structure complete",
+      "details": "All required documentation files present: 4 files",
+      "action": "Documentation structure follows standards"
+    },
+    "system_health": {
+      "status": "\u2705 PASS",
+      "message": "Health check passes and reports healthy system",
+      "details": "Health check completed in ~29.5s",
+      "action": "System health check operational"
+    }
+  }
+}

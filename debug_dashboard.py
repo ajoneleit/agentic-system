@@ -2,19 +2,21 @@
 """Debug script to test the dashboard data flow."""
 
 import asyncio
-import json
+
 from test_dashboard import MockCoordinator
+
 from monitoring_dashboard import MonitoringDashboard
+
 
 async def main():
     """Debug the dashboard data flow."""
     print("🔍 Debugging Dashboard Data Flow")
     print("=" * 50)
-    
+
     # Create mock coordinator
     print("1. Creating mock coordinator...")
     coordinator = MockCoordinator()
-    
+
     # Test get_system_status
     print("\n2. Testing get_system_status()...")
     try:
@@ -22,12 +24,12 @@ async def main():
         print(f"✅ get_system_status() returned: {len(system_status)} keys")
         print(f"   - total_agents: {system_status.get('total_agents', 'NOT FOUND')}")
         print(f"   - agents list length: {len(system_status.get('agents', []))}")
-        
+
         # Show first agent details
         agents = system_status.get('agents', [])
         if agents:
             first_agent = agents[0]
-            print(f"\n   First agent details:")
+            print("\n   First agent details:")
             print(f"   - id: {first_agent.get('id', 'NOT FOUND')}")
             print(f"   - role: {first_agent.get('role', 'NOT FOUND')}")
             print(f"   - status: {first_agent.get('status', 'NOT FOUND')}")
@@ -36,7 +38,7 @@ async def main():
             print("   ❌ No agents found in system_status")
     except Exception as e:
         print(f"   ❌ Error: {e}")
-    
+
     # Test dashboard creation
     print("\n3. Testing dashboard creation...")
     try:
@@ -45,7 +47,7 @@ async def main():
     except Exception as e:
         print(f"   ❌ Error creating dashboard: {e}")
         return
-    
+
     # Test agent list creation
     print("\n4. Testing create_agent_list()...")
     try:
@@ -57,7 +59,7 @@ async def main():
         print(f"   ❌ Error creating agent list: {e}")
         import traceback
         traceback.print_exc()
-    
+
     # Test progress charts
     print("\n5. Testing create_progress_charts()...")
     try:
@@ -69,7 +71,7 @@ async def main():
         print(f"   ❌ Error creating progress charts: {e}")
         import traceback
         traceback.print_exc()
-    
+
     # Test system status
     print("\n6. Testing create_system_status()...")
     try:
@@ -80,7 +82,7 @@ async def main():
         print(f"   ❌ Error creating system status: {e}")
         import traceback
         traceback.print_exc()
-    
+
     print("\n✅ Debug complete!")
 
 if __name__ == "__main__":
