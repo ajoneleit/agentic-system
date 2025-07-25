@@ -20,7 +20,7 @@ This document outlines the architecture for an agentic coding system designed to
 - **Context Management**: Maintains shared context across all agents
 - **Progress Tracking**: Real-time monitoring of overall project completion
 
-### 2. Prompt Evolution System (Powered by Claude 3 Opus)
+### 2. Prompt Evolution System (Powered by openai o3)
 **Primary Responsibilities:**
 - **Autonomous Prompt Refinement**: Continuously improves prompt quality and effectiveness
 - **Performance Analysis**: Analyzes success/failure patterns across task executions
